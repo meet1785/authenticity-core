@@ -1,7 +1,14 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Menu, X, Shield, ChevronRight } from "lucide-react";
+import { Menu, X, Shield, ChevronRight, User, Settings, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -66,19 +73,49 @@ export function Navbar() {
             ))}
           </div>
 
-          {/* CTA Button */}
+          {/* Auth/CTA Section - Ready for authentication integration */}
           <div className="hidden md:flex items-center space-x-4">
-            <Button variant="ghost" asChild>
-              <Link to="/demo">Try Demo</Link>
-            </Button>
-            <Button className="gradient-border" asChild>
-              <div className="bg-background px-6 py-2 rounded-[calc(var(--radius)-1px)] hover:bg-primary/10 transition-colors">
-                <span className="gradient-text font-semibold flex items-center gap-2">
-                  Get Started
-                  <ChevronRight className="h-4 w-4" />
-                </span>
-              </div>
-            </Button>
+            {/* User Profile Dropdown - Will be shown when authenticated */}
+            {false ? ( // Replace with auth check
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="relative">
+                    <div className="w-8 h-8 rounded-full bg-gradient-primary flex items-center justify-center">
+                      <User className="h-4 w-4 text-primary-foreground" />
+                    </div>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="glass-panel">
+                  <DropdownMenuItem className="flex items-center gap-2">
+                    <User className="h-4 w-4" />
+                    <span>Profile</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="flex items-center gap-2">
+                    <Settings className="h-4 w-4" />
+                    <span>Settings</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="flex items-center gap-2 text-destructive">
+                    <LogOut className="h-4 w-4" />
+                    <span>Sign Out</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : (
+              <>
+                <Button variant="ghost" asChild>
+                  <Link to="/demo">Try Demo</Link>
+                </Button>
+                <Button className="neon-border px-6 py-2 bg-gradient-primary hover:opacity-90" asChild>
+                  <Link to="/contact">
+                    <span className="font-semibold flex items-center gap-2">
+                      Get Started
+                      <ChevronRight className="h-4 w-4" />
+                    </span>
+                  </Link>
+                </Button>
+              </>
+            )}
           </div>
 
           {/* Mobile Menu Toggle */}

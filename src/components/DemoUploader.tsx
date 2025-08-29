@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { Upload, Link2, Image, Loader2 } from "lucide-react";
+import { useState, useCallback, useRef } from "react";
+import { Upload, Link2, Image, Loader2, X, FileImage } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -8,12 +8,15 @@ import { useToast } from "@/hooks/use-toast";
 import { HeatmapViewer } from "./HeatmapViewer";
 import { DetectionResult } from "@/types/detection";
 import { detectDeepfake } from "@/lib/detection";
+import { cn } from "@/lib/utils";
 
 export function DemoUploader() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [result, setResult] = useState<DetectionResult | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const processImage = useCallback(async (imageSource: string) => {
@@ -64,6 +67,37 @@ export function DemoUploader() {
     }
   }, [processImage, toast]);
 
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const imageData = event.target?.result as string;
+        processImage(imageData);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      toast({
+        title: "Invalid File",
+        description: "Please drop an image file.",
+        variant: "destructive",
+      });
+    }
+  }, [processImage, toast]);
+
   const handleUrlSubmit = useCallback(() => {
     if (!imageUrl.trim()) {
       toast({
@@ -80,6 +114,9 @@ export function DemoUploader() {
     setUploadedImage(null);
     setResult(null);
     setImageUrl("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   };
 
   return (
@@ -94,26 +131,48 @@ export function DemoUploader() {
             
             <TabsContent value="upload" className="mt-6">
               <div className="flex flex-col items-center justify-center">
-                <label
-                  htmlFor="file-upload"
-                  className="group cursor-pointer flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-border/50 rounded-lg hover:border-primary/50 transition-colors"
+                <div
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={cn(
+                    "relative w-full h-64 border-2 border-dashed rounded-lg transition-all",
+                    isDragging
+                      ? "border-primary bg-primary/10 scale-105"
+                      : "border-border/50 hover:border-primary/50"
+                  )}
                 >
-                  <Upload className="h-12 w-12 text-muted-foreground group-hover:text-primary transition-colors mb-4" />
-                  <p className="text-muted-foreground group-hover:text-foreground transition-colors">
-                    Click to upload or drag and drop
-                  </p>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    PNG, JPG, GIF up to 10MB
-                  </p>
-                  <input
-                    id="file-upload"
-                    type="file"
-                    className="hidden"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    disabled={isProcessing}
-                  />
-                </label>
+                  <label
+                    htmlFor="file-upload"
+                    className="cursor-pointer flex flex-col items-center justify-center w-full h-full"
+                  >
+                    {isDragging ? (
+                      <>
+                        <FileImage className="h-12 w-12 text-primary mb-4 animate-pulse" />
+                        <p className="text-primary font-medium">Drop your image here</p>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-12 w-12 text-muted-foreground group-hover:text-primary transition-colors mb-4" />
+                        <p className="text-muted-foreground group-hover:text-foreground transition-colors">
+                          Click to upload or drag and drop
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-2">
+                          PNG, JPG, GIF up to 10MB
+                        </p>
+                      </>
+                    )}
+                    <input
+                      ref={fileInputRef}
+                      id="file-upload"
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      onChange={handleFileUpload}
+                      disabled={isProcessing}
+                    />
+                  </label>
+                </div>
               </div>
             </TabsContent>
             

@@ -120,7 +120,6 @@ All colors MUST be HSL.
     font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
   }
 }
-
 @layer components {
   .gradient-text {
     @apply bg-clip-text text-transparent;
@@ -136,6 +135,11 @@ All colors MUST be HSL.
 
   .glass-effect {
     @apply backdrop-blur-xl bg-card/50 border border-border/50;
+  }
+
+  .glass-panel {
+    @apply backdrop-blur-2xl bg-gradient-to-br from-card/80 via-card/60 to-card/40 border border-border/50;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
   }
 
   .glow-effect {
@@ -157,6 +161,33 @@ All colors MUST be HSL.
   .animate-pulse-glow {
     animation: pulse-glow 2s ease-in-out infinite;
   }
+
+  .neon-border {
+    @apply relative overflow-hidden rounded-lg;
+    background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent))) padding-box,
+                linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent))) border-box;
+    border: 2px solid transparent;
+  }
+
+  .hover-lift {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl;
+  }
+
+  .status-indicator {
+    @apply relative inline-flex h-3 w-3;
+  }
+
+  .status-indicator::before {
+    @apply absolute inline-flex h-full w-full animate-ping rounded-full opacity-75;
+    content: "";
+    background-color: currentColor;
+  }
+
+  .status-indicator::after {
+    @apply relative inline-flex h-3 w-3 rounded-full;
+    content: "";
+    background-color: currentColor;
+  }
 }
 
 @layer utilities {
@@ -176,8 +207,37 @@ All colors MUST be HSL.
     100% { background-position: 0% 50%; }
   }
 
+  @keyframes slide-up {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -1000px 0; }
+    100% { background-position: 1000px 0; }
+  }
+
+  @keyframes orbit {
+    from { transform: rotate(0deg) translateX(150px) rotate(0deg); }
+    to { transform: rotate(360deg) translateX(150px) rotate(-360deg); }
+  }
+
   .animate-gradient {
     background-size: 200% 200%;
     animation: gradient-shift 3s ease infinite;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.5s ease-out;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / 0.1) 50%, transparent 100%);
+    background-size: 1000px 100%;
+    animation: shimmer 2s infinite;
+  }
+
+  .animate-orbit {
+    animation: orbit 20s linear infinite;
   }
 }

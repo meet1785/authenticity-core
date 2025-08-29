@@ -1,47 +1,99 @@
+import { useState } from "react";
 import { Navbar } from "@/components/Navbar";
 import { Footer } from "@/components/Footer";
 import { DemoUploader } from "@/components/DemoUploader";
-import { Info, Shield, Zap } from "lucide-react";
+import { ConfigPanel } from "@/components/ConfigPanel";
+import { DetectionHistory } from "@/components/DetectionHistory";
+import { ApiStatus } from "@/components/ApiStatus";
+import { Info, Shield, Zap, Settings, History } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { DetectionResult } from "@/types/detection";
 
 export default function Demo() {
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [detectionHistory, setDetectionHistory] = useState<DetectionResult[]>([]);
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
       
+      {/* API Status Indicator */}
+      <ApiStatus />
+      
+      {/* Configuration Panel */}
+      <ConfigPanel isOpen={isConfigOpen} onClose={() => setIsConfigOpen(false)} />
+      
       {/* Hero Section */}
       <section className="pt-32 pb-16 relative">
         <div className="absolute inset-0 mesh-gradient opacity-10" />
+        <div className="absolute top-20 left-10 w-64 h-64 bg-primary/20 rounded-full blur-[120px] animate-pulse-glow" />
+        <div className="absolute bottom-20 right-10 w-64 h-64 bg-accent/20 rounded-full blur-[120px] animate-pulse-glow" />
+        
         <div className="container mx-auto px-4 relative">
           <div className="text-center max-w-3xl mx-auto mb-8">
-            <div className="inline-flex items-center gap-2 px-4 py-2 glass-effect rounded-full mb-6">
+            <div className="inline-flex items-center gap-2 px-4 py-2 glass-panel rounded-full mb-6 animate-shimmer">
               <Zap className="h-4 w-4 text-primary" />
               <span className="text-sm font-medium">Live Detection Demo</span>
             </div>
             
             <h1 className="text-4xl md:text-5xl lg:text-6xl font-space font-bold mb-6">
-              <span className="gradient-text">Test Our AI</span>
+              <span className="gradient-text animate-gradient">Test Our AI</span>
               <br />
               <span className="text-foreground">Detection Engine</span>
             </h1>
             <p className="text-lg text-muted-foreground">
               Upload an image or provide a URL to experience our deepfake detection in action
             </p>
+            
+            {/* Config Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-4"
+              onClick={() => setIsConfigOpen(true)}
+            >
+              <Settings className="h-4 w-4 mr-2" />
+              Configure API
+            </Button>
           </div>
 
           {/* Info Alert */}
-          <div className="max-w-4xl mx-auto mb-12">
-            <Alert className="glass-effect border-primary/50">
+          <div className="max-w-6xl mx-auto mb-12">
+            <Alert className="glass-panel border-primary/50">
               <Info className="h-4 w-4" />
               <AlertDescription>
-                This demo uses mock data for demonstration purposes. In production, our API processes images through real AI models with 99.8% accuracy. 
+                This demo uses mock data for demonstration purposes. Click "Configure API" to connect your own deployment. 
                 No images are stored or retained during the demo.
               </AlertDescription>
             </Alert>
           </div>
 
-          {/* Demo Uploader */}
-          <DemoUploader />
+          {/* Main Demo Area with History */}
+          <div className="max-w-6xl mx-auto">
+            <Tabs defaultValue="detection" className="w-full">
+              <TabsList className="grid w-full grid-cols-2 bg-muted/50 max-w-sm mx-auto mb-8">
+                <TabsTrigger value="detection">
+                  <Shield className="h-4 w-4 mr-2" />
+                  Detection
+                </TabsTrigger>
+                <TabsTrigger value="history">
+                  <History className="h-4 w-4 mr-2" />
+                  History
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="detection">
+                <DemoUploader />
+              </TabsContent>
+              
+              <TabsContent value="history">
+                <DetectionHistory history={detectionHistory} />
+              </TabsContent>
+            </Tabs>
+          </div>
         </div>
       </section>
 
