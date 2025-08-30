@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { HeatmapViewer } from "./HeatmapViewer";
+import { MultiModelHeatmap } from "./MultiModelHeatmap";
 import { DetectionResult } from "@/types/detection";
 import { detectDeepfake } from "@/lib/detection";
 import { cn } from "@/lib/utils";
@@ -232,25 +233,16 @@ export function DemoUploader() {
                   </Button>
                 </div>
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Uploaded Image */}
-                  <div>
-                    <h4 className="text-sm font-medium text-muted-foreground mb-2">
-                      Analyzed Image
-                    </h4>
-                    <img
-                      src={uploadedImage}
-                      alt="Uploaded"
-                      className="w-full rounded-lg border border-border"
-                    />
-                  </div>
-                  
-                  {/* Heatmap */}
-                  <HeatmapViewer
-                    imageUrl={uploadedImage}
-                    heatmapUrl={result.heatmapUrl}
-                  />
-                </div>
+                {/* Multi-Model Heatmap Visualization */}
+                <MultiModelHeatmap
+                  originalImage={uploadedImage}
+                  xceptNetHeatmap={result.xceptNetHeatmap}
+                  supConHeatmap={result.supConHeatmap}
+                  ensembleHeatmap={result.heatmapUrl}
+                  modelHeatmaps={result.modelPredictions
+                    .filter(m => m.heatmapUrl)
+                    .map(m => ({ name: m.name, url: m.heatmapUrl! }))}
+                />
               </Card>
 
               <Card className={`glass-effect border-2 ${

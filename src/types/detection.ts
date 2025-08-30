@@ -2,6 +2,7 @@ export interface ModelPrediction {
   name: string;
   realConfidence: number;
   fakeConfidence: number;
+  heatmapUrl?: string; // Individual model heatmap
 }
 
 export interface DetectionResult {
@@ -9,6 +10,9 @@ export interface DetectionResult {
   isDeepfake: boolean;
   ensembleConfidence: number;
   modelPredictions: ModelPrediction[];
-  heatmapUrl?: string;
+  heatmapUrl?: string; // Ensemble heatmap
+  xceptNetHeatmap?: string;
+  supConHeatmap?: string;
   timestamp: string;
+  imageUrl?: string;
 }

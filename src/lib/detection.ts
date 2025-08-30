@@ -1,7 +1,23 @@
 import { DetectionResult, ModelPrediction } from "@/types/detection";
+import { detectDeepfakeAPI } from "@/lib/api";
 
 // Mock detection function for demo purposes
 export async function detectDeepfake(imageUrl: string): Promise<DetectionResult> {
+  // Check if API is configured
+  const apiUrl = localStorage.getItem('api_base_url');
+  
+  if (apiUrl) {
+    try {
+      // Try to use real API
+      return await detectDeepfakeAPI(imageUrl, {
+        models: ['EfficientNetB0', 'VGG16', 'Custom CNN', 'XceptNet', 'SupCon'],
+        returnHeatmaps: true,
+      });
+    } catch (error) {
+      console.log('API call failed, falling back to mock data:', error);
+      // Fall through to mock data
+    }
+  }
   // Simulate API call delay
   await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -46,5 +62,8 @@ export async function detectDeepfake(imageUrl: string): Promise<DetectionResult>
       fakeConfidence: Math.round(pred.fakeConfidence),
     })),
     timestamp: new Date().toISOString(),
+    // Mock heatmaps for demo
+    xceptNetHeatmap: undefined,
+    supConHeatmap: undefined,
   };
 }
