@@ -236,8 +236,9 @@ export function DemoUploader() {
                 {/* Multi-Model Heatmap Visualization */}
                 <MultiModelHeatmap
                   originalImage={uploadedImage}
-                  xceptNetHeatmap={result.xceptNetHeatmap}
-                  supConHeatmap={result.supConHeatmap}
+                  cnnHeatmap={result.cnnHeatmap}
+                  efficientNetHeatmap={result.efficientNetHeatmap}
+                  vitHeatmap={result.vitHeatmap}
                   ensembleHeatmap={result.heatmapUrl}
                   modelHeatmaps={result.modelPredictions
                     .filter(m => m.heatmapUrl)

@@ -10,7 +10,7 @@ export async function detectDeepfake(imageUrl: string): Promise<DetectionResult>
     try {
       // Try to use real API
       return await detectDeepfakeAPI(imageUrl, {
-        models: ['EfficientNetB0', 'VGG16', 'Custom CNN', 'XceptNet', 'SupCon'],
+        models: ['CNN', 'EfficientNet', 'ViT'],
         returnHeatmaps: true,
       });
     } catch (error) {
@@ -22,28 +22,28 @@ export async function detectDeepfake(imageUrl: string): Promise<DetectionResult>
   await new Promise((resolve) => setTimeout(resolve, 100));
 
   // Generate mock predictions with realistic variations
+  const cnnConfidence = 80 + Math.random() * 19; // 80-99%
   const efficientNetConfidence = 75 + Math.random() * 24; // 75-99%
-  const vgg16Confidence = 70 + Math.random() * 29; // 70-99%
-  const customCnnConfidence = 80 + Math.random() * 19; // 80-99%
+  const vitConfidence = 82 + Math.random() * 17; // 82-99%
 
   // Randomly determine if fake (30% chance for demo)
   const isFake = Math.random() < 0.3;
 
   const modelPredictions: ModelPrediction[] = [
     {
-      name: "EfficientNetB0",
+      name: "CNN",
+      realConfidence: isFake ? 100 - cnnConfidence : cnnConfidence,
+      fakeConfidence: isFake ? cnnConfidence : 100 - cnnConfidence,
+    },
+    {
+      name: "EfficientNet",
       realConfidence: isFake ? 100 - efficientNetConfidence : efficientNetConfidence,
       fakeConfidence: isFake ? efficientNetConfidence : 100 - efficientNetConfidence,
     },
     {
-      name: "VGG16",
-      realConfidence: isFake ? 100 - vgg16Confidence : vgg16Confidence,
-      fakeConfidence: isFake ? vgg16Confidence : 100 - vgg16Confidence,
-    },
-    {
-      name: "Custom CNN",
-      realConfidence: isFake ? 100 - customCnnConfidence : customCnnConfidence,
-      fakeConfidence: isFake ? customCnnConfidence : 100 - customCnnConfidence,
+      name: "ViT",
+      realConfidence: isFake ? 100 - vitConfidence : vitConfidence,
+      fakeConfidence: isFake ? vitConfidence : 100 - vitConfidence,
     },
   ];
 
@@ -63,7 +63,8 @@ export async function detectDeepfake(imageUrl: string): Promise<DetectionResult>
     })),
     timestamp: new Date().toISOString(),
     // Mock heatmaps for demo
-    xceptNetHeatmap: undefined,
-    supConHeatmap: undefined,
+    cnnHeatmap: undefined,
+    efficientNetHeatmap: undefined,
+    vitHeatmap: undefined,
   };
 }

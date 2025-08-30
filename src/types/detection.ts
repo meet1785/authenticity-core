@@ -11,8 +11,9 @@ export interface DetectionResult {
   ensembleConfidence: number;
   modelPredictions: ModelPrediction[];
   heatmapUrl?: string; // Ensemble heatmap
-  xceptNetHeatmap?: string;
-  supConHeatmap?: string;
+  cnnHeatmap?: string;
+  efficientNetHeatmap?: string;
+  vitHeatmap?: string;
   timestamp: string;
   imageUrl?: string;
 }

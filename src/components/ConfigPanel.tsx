@@ -27,7 +27,7 @@ export function ConfigPanel({ isOpen, onClose }: ConfigPanelProps) {
   const [enableSupCon, setEnableSupCon] = useState(true);
   const [batchMode, setBatchMode] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'error'>('idle');
-  const [selectedModels, setSelectedModels] = useState(['EfficientNetB0', 'VGG16', 'Custom CNN', 'XceptNet', 'SupCon']);
+  const [selectedModels, setSelectedModels] = useState(['CNN', 'EfficientNet', 'ViT']);
 
   if (!isOpen) return null;
 
@@ -208,7 +208,7 @@ export function ConfigPanel({ isOpen, onClose }: ConfigPanelProps) {
                 <div className="p-4 glass-effect rounded-lg">
                   <h3 className="font-medium mb-3">Model Selection</h3>
                   <div className="space-y-3">
-                    {["EfficientNetB0", "VGG16", "Custom CNN", "XceptNet", "SupCon"].map((model) => (
+                    {["CNN", "EfficientNet", "ViT"].map((model) => (
                       <label key={model} className="flex items-center gap-3 cursor-pointer">
                         <input
                           type="checkbox"

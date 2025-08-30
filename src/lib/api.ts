@@ -30,8 +30,9 @@ export interface FastAPIDetectionResponse {
     confidence: number;
     heatmap?: string; // Base64 encoded heatmap
   }[];
-  xceptnet_heatmap?: string;
-  supcon_heatmap?: string;
+  cnn_heatmap?: string;
+  efficientnet_heatmap?: string;
+  vit_heatmap?: string;
   ensemble_heatmap?: string;
   processing_time: number;
 }
@@ -92,8 +93,9 @@ function mapFastAPIResponse(
       heatmapUrl: pred.heatmap ? `data:image/png;base64,${pred.heatmap}` : undefined,
     })),
     heatmapUrl: response.ensemble_heatmap ? `data:image/png;base64,${response.ensemble_heatmap}` : undefined,
-    xceptNetHeatmap: response.xceptnet_heatmap ? `data:image/png;base64,${response.xceptnet_heatmap}` : undefined,
-    supConHeatmap: response.supcon_heatmap ? `data:image/png;base64,${response.supcon_heatmap}` : undefined,
+    cnnHeatmap: response.cnn_heatmap ? `data:image/png;base64,${response.cnn_heatmap}` : undefined,
+    efficientNetHeatmap: response.efficientnet_heatmap ? `data:image/png;base64,${response.efficientnet_heatmap}` : undefined,
+    vitHeatmap: response.vit_heatmap ? `data:image/png;base64,${response.vit_heatmap}` : undefined,
     timestamp: new Date().toISOString(),
     imageUrl,
   };
