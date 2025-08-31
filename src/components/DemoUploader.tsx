@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { Upload, Link2, Image, Loader2, X, FileImage } from "lucide-react";
+import { Upload, Link2, Image, Loader2, X, FileImage, Brain } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -10,42 +10,50 @@ import { MultiModelHeatmap } from "./MultiModelHeatmap";
 import { DetectionResult } from "@/types/detection";
 import { detectDeepfake } from "@/lib/detection";
 import { cn } from "@/lib/utils";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 
 export function DemoUploader() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [imageUrl, setImageUrl] = useState("");
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [result, setResult] = useState<DetectionResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [selectedModels, setSelectedModels] = useState<string[]>(['CNN', 'EfficientNet', 'VGG16']);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  const processImage = useCallback(async (imageSource: string) => {
+  const processImage = useCallback(async (imageSource: string | File) => {
     setIsProcessing(true);
-    setUploadedImage(imageSource);
+    if (typeof imageSource === 'string') {
+      setUploadedImage(imageSource);
+    } else {
+      setUploadedImage(URL.createObjectURL(imageSource));
+      setUploadedFile(imageSource);
+    }
     
     try {
-      // Simulate processing delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      const detectionResult = await detectDeepfake(imageSource);
+      const detectionResult = await detectDeepfake(imageSource, {
+        models: selectedModels
+      });
       setResult(detectionResult);
       
       toast({
         title: "Analysis Complete",
-        description: `Image classified as ${detectionResult.prediction}`,
+        description: `Image classified as ${detectionResult.prediction} with ${detectionResult.ensembleConfidence}% confidence`,
         variant: detectionResult.isDeepfake ? "destructive" : "default",
       });
     } catch (error) {
       toast({
         title: "Error",
-        description: "Failed to process image. Please try again.",
+        description: error instanceof Error ? error.message : "Failed to process image. Please check your API configuration.",
         variant: "destructive",
       });
     } finally {
       setIsProcessing(false);
     }
-  }, [toast]);
+  }, [toast, selectedModels]);
 
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -59,12 +67,8 @@ export function DemoUploader() {
         return;
       }
       
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const imageData = e.target?.result as string;
-        processImage(imageData);
-      };
-      reader.readAsDataURL(file);
+      // Process file directly for multipart form data
+      processImage(file);
     }
   }, [processImage, toast]);
 
@@ -84,12 +88,8 @@ export function DemoUploader() {
     
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith("image/")) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const imageData = event.target?.result as string;
-        processImage(imageData);
-      };
-      reader.readAsDataURL(file);
+      // Process file directly for multipart form data
+      processImage(file);
     } else {
       toast({
         title: "Invalid File",
@@ -130,7 +130,39 @@ export function DemoUploader() {
               <TabsTrigger value="url">Image URL</TabsTrigger>
             </TabsList>
             
-            <TabsContent value="upload" className="mt-6">
+            <TabsContent value="upload" className="mt-6 space-y-4">
+              {/* Model Selection */}
+              <div className="space-y-3">
+                <Label className="text-sm font-medium flex items-center gap-2">
+                  <Brain className="h-4 w-4" />
+                  Select Models to Run
+                </Label>
+                <div className="flex flex-wrap gap-4">
+                  {['CNN', 'EfficientNet', 'VGG16'].map((model) => (
+                    <div key={model} className="flex items-center space-x-2">
+                      <Checkbox
+                        id={model}
+                        checked={selectedModels.includes(model)}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            setSelectedModels([...selectedModels, model]);
+                          } else {
+                            setSelectedModels(selectedModels.filter(m => m !== model));
+                          }
+                        }}
+                        disabled={isProcessing}
+                      />
+                      <Label
+                        htmlFor={model}
+                        className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                      >
+                        {model}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
               <div className="flex flex-col items-center justify-center">
                 <div
                   onDragOver={handleDragOver}

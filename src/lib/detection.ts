@@ -1,16 +1,19 @@
 import { DetectionResult, ModelPrediction } from "@/types/detection";
 import { detectDeepfakeAPI } from "@/lib/api";
 
-// Mock detection function for demo purposes
-export async function detectDeepfake(imageUrl: string): Promise<DetectionResult> {
+// Detection function with fallback to mock data
+export async function detectDeepfake(
+  imageData: string | File, 
+  config?: { models?: string[] }
+): Promise<DetectionResult> {
   // Check if API is configured
   const apiUrl = localStorage.getItem('api_base_url');
   
   if (apiUrl) {
     try {
       // Try to use real API
-      return await detectDeepfakeAPI(imageUrl, {
-        models: ['CNN', 'EfficientNet', 'ViT'],
+      return await detectDeepfakeAPI(imageData, {
+        models: config?.models || ['CNN', 'EfficientNet', 'VGG16'],
         returnHeatmaps: true,
       });
     } catch (error) {

@@ -8,33 +8,36 @@ const API_KEY = localStorage.getItem('api_key') || '';
 const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
-    'Content-Type': 'application/json',
     ...(API_KEY && { 'X-API-Key': API_KEY })
   },
   timeout: 30000, // 30 seconds for model inference
 });
 
-export interface FastAPIDetectionRequest {
-  image?: string; // Base64 encoded image
-  image_url?: string; // Image URL
-  models?: string[]; // Models to use for detection
-  return_heatmaps?: boolean;
+export interface ModelPredictionResponse {
+  model: string;
+  predicted_class: number; // 0 for real, 1+ for fake
+  probabilities: number[]; // [real_prob, fake_prob, ...]
+  heatmap?: string; // Base64 encoded heatmap if available
 }
 
-export interface FastAPIDetectionResponse {
-  prediction: 'real' | 'fake';
-  confidence: number;
-  model_predictions: {
-    model_name: string;
-    prediction: string;
-    confidence: number;
-    heatmap?: string; // Base64 encoded heatmap
-  }[];
-  cnn_heatmap?: string;
-  efficientnet_heatmap?: string;
-  vit_heatmap?: string;
-  ensemble_heatmap?: string;
-  processing_time: number;
+export type ModelType = 'cnn' | 'effnet' | 'vgg';
+
+export async function detectWithModel(
+  imageFile: File,
+  model: ModelType
+): Promise<ModelPredictionResponse> {
+  const formData = new FormData();
+  formData.append('file', imageFile);
+  
+  const response = await api.post<ModelPredictionResponse>(
+    `/predict/${model}`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }
+  );
+  
+  return response.data;
 }
 
 export async function detectDeepfakeAPI(
@@ -42,63 +45,64 @@ export async function detectDeepfakeAPI(
   config?: { models?: string[]; returnHeatmaps?: boolean }
 ): Promise<DetectionResult> {
   try {
-    const formData = new FormData();
-    
+    // Convert to File if needed
+    let file: File;
     if (imageData instanceof File) {
-      formData.append('file', imageData);
+      file = imageData;
     } else {
-      // Handle base64 or URL
-      const request: FastAPIDetectionRequest = {
-        image_url: imageData.startsWith('http') ? imageData : undefined,
-        image: !imageData.startsWith('http') ? imageData : undefined,
-        models: config?.models,
-        return_heatmaps: config?.returnHeatmaps ?? true,
-      };
-      
-      const response = await api.post<FastAPIDetectionResponse>('/detect', request);
-      return mapFastAPIResponse(response.data, imageData);
+      // Convert base64 or URL to File
+      const response = await fetch(imageData);
+      const blob = await response.blob();
+      file = new File([blob], 'image.jpg', { type: 'image/jpeg' });
     }
     
-    // For file upload
-    if (config?.models) {
-      formData.append('models', JSON.stringify(config.models));
-    }
-    if (config?.returnHeatmaps !== undefined) {
-      formData.append('return_heatmaps', String(config.returnHeatmaps));
-    }
+    // Get selected models or use defaults
+    const modelsToUse = config?.models?.map(m => 
+      m.toLowerCase().replace('efficientnet', 'effnet')
+    ) as ModelType[] || ['cnn', 'effnet', 'vgg'];
     
-    const response = await api.post<FastAPIDetectionResponse>('/detect/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    });
+    // Run predictions in parallel
+    const predictions = await Promise.all(
+      modelsToUse.map(model => detectWithModel(file, model))
+    );
     
-    return mapFastAPIResponse(response.data, URL.createObjectURL(imageData as File));
+    // Aggregate results
+    const isDeepfake = predictions.every(p => p.predicted_class > 0);
+    const avgConfidence = predictions.reduce((acc, p) => {
+      const fakeProb = p.probabilities[1] || 0;
+      return acc + (p.predicted_class > 0 ? fakeProb : (1 - fakeProb));
+    }, 0) / predictions.length;
+    
+    return {
+      prediction: isDeepfake ? 'Fake' : 'Real',
+      isDeepfake,
+      ensembleConfidence: Math.round(avgConfidence * 100),
+      modelPredictions: predictions.map(pred => {
+        const realProb = pred.probabilities[0] || 0;
+        const fakeProb = pred.probabilities[1] || 0;
+        
+        return {
+          name: pred.model.toUpperCase().replace('EFFNET', 'EfficientNet').replace('VGG', 'VGG16'),
+          realConfidence: Math.round(realProb * 100),
+          fakeConfidence: Math.round(fakeProb * 100),
+          heatmapUrl: pred.heatmap ? `data:image/png;base64,${pred.heatmap}` : undefined,
+        };
+      }),
+      heatmapUrl: predictions.find(p => p.heatmap)?.heatmap ? 
+        `data:image/png;base64,${predictions.find(p => p.heatmap)!.heatmap}` : undefined,
+      cnnHeatmap: predictions.find(p => p.model === 'cnn')?.heatmap ? 
+        `data:image/png;base64,${predictions.find(p => p.model === 'cnn')!.heatmap}` : undefined,
+      efficientNetHeatmap: predictions.find(p => p.model === 'effnet')?.heatmap ? 
+        `data:image/png;base64,${predictions.find(p => p.model === 'effnet')!.heatmap}` : undefined,
+      vitHeatmap: predictions.find(p => p.model === 'vgg')?.heatmap ? 
+        `data:image/png;base64,${predictions.find(p => p.model === 'vgg')!.heatmap}` : undefined,
+      timestamp: new Date().toISOString(),
+      imageUrl: imageData instanceof File ? URL.createObjectURL(imageData) : imageData,
+    };
   } catch (error) {
     console.error('API Detection Error:', error);
     throw error;
   }
-}
-
-function mapFastAPIResponse(
-  response: FastAPIDetectionResponse,
-  imageUrl: string
-): DetectionResult {
-  return {
-    prediction: response.prediction === 'fake' ? 'Fake' : 'Real',
-    isDeepfake: response.prediction === 'fake',
-    ensembleConfidence: Math.round(response.confidence * 100),
-    modelPredictions: response.model_predictions.map(pred => ({
-      name: pred.model_name,
-      realConfidence: pred.prediction === 'real' ? Math.round(pred.confidence * 100) : Math.round((1 - pred.confidence) * 100),
-      fakeConfidence: pred.prediction === 'fake' ? Math.round(pred.confidence * 100) : Math.round((1 - pred.confidence) * 100),
-      heatmapUrl: pred.heatmap ? `data:image/png;base64,${pred.heatmap}` : undefined,
-    })),
-    heatmapUrl: response.ensemble_heatmap ? `data:image/png;base64,${response.ensemble_heatmap}` : undefined,
-    cnnHeatmap: response.cnn_heatmap ? `data:image/png;base64,${response.cnn_heatmap}` : undefined,
-    efficientNetHeatmap: response.efficientnet_heatmap ? `data:image/png;base64,${response.efficientnet_heatmap}` : undefined,
-    vitHeatmap: response.vit_heatmap ? `data:image/png;base64,${response.vit_heatmap}` : undefined,
-    timestamp: new Date().toISOString(),
-    imageUrl,
-  };
 }
 
 export function updateAPIConfig(baseUrl: string, apiKey?: string) {

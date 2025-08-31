@@ -23,8 +23,6 @@ export function ConfigPanel({ isOpen, onClose }: ConfigPanelProps) {
   const [apiType, setApiType] = useState<'fastapi' | 'custom'>('fastapi');
   const [confidenceThreshold, setConfidenceThreshold] = useState([70]);
   const [enableHeatmap, setEnableHeatmap] = useState(true);
-  const [enableXceptNet, setEnableXceptNet] = useState(true);
-  const [enableSupCon, setEnableSupCon] = useState(true);
   const [batchMode, setBatchMode] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'error'>('idle');
   const [selectedModels, setSelectedModels] = useState(['CNN', 'EfficientNet', 'ViT']);
@@ -208,7 +206,7 @@ export function ConfigPanel({ isOpen, onClose }: ConfigPanelProps) {
                 <div className="p-4 glass-effect rounded-lg">
                   <h3 className="font-medium mb-3">Model Selection</h3>
                   <div className="space-y-3">
-                    {["CNN", "EfficientNet", "ViT"].map((model) => (
+                    {["CNN", "EfficientNet", "VGG16"].map((model) => (
                       <label key={model} className="flex items-center gap-3 cursor-pointer">
                         <input
                           type="checkbox"
