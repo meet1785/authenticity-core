@@ -1,73 +1,93 @@
-# Welcome to your Lovable project
+# AuthenticityNet
 
-## Project info
+AuthenticityNet is an AI-powered image authenticity verification system that uses multiple deep learning models (CNN, EfficientNet, and VGG16) to analyze and classify images. The system consists of a React frontend, FastAPI backend, and supports both local and distributed deployment options.
 
-**URL**: https://lovable.dev/projects/e574c6de-f587-4366-ae28-d1c1e3206111
+## Project Structure
 
-## How can I edit this code?
-
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/e574c6de-f587-4366-ae28-d1c1e3206111) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+├── frontend/
+│   └── authenticity-core/     # React frontend application
+├── models/
+│   ├── cnn_standalone.keras
+│   ├── effnet_standalone_authnet.keras
+│   └── vgg16_standalone_authnet.keras
+├── config.py                  # Configuration settings
+├── main.py                    # Backend API server
+├── model_server.py            # Optional remote model server
+├── requirements.txt           # Python dependencies
+├── SETUP_GUIDE.md            # Detailed setup instructions
+├── start_all.bat             # Script to start both backend and frontend
+├── start_backend.bat         # Script to start the backend
+├── start_frontend.bat        # Script to start the frontend
+├── start_model_server.bat    # Script to start the model server
+├── test_connection.py        # Utility to test model server connection
+└── README.md                 # This file
 ```
 
-**Edit a file directly in GitHub**
+## Quick Start
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+For the easiest setup, use the provided batch files:
 
-**Use GitHub Codespaces**
+1. **One-Click Setup (Backend + Frontend)**:
+   ```
+   start_all.bat
+   ```
+   This will start both the backend and frontend in separate windows.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+2. **Backend Only**:
+   ```
+   start_backend.bat
+   ```
+   When prompted, enter the model server URL or leave empty for local models.
 
-## What technologies are used for this project?
+3. **Frontend Only**:
+   ```
+   start_frontend.bat
+   ```
 
-This project is built with:
+For detailed setup instructions, including distributed deployment options, see [SETUP_GUIDE.md](SETUP_GUIDE.md).
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## Running the Backend
 
-## How can I deploy this project?
+Start the server with:
+```bash
+uvicorn main:app --reload
+```
 
-Simply open [Lovable](https://lovable.dev/projects/e574c6de-f587-4366-ae28-d1c1e3206111) and click on Share -> Publish.
+The backend will be available at:
+- http://127.0.0.1:8000
 
-## Can I connect a custom domain to my Lovable project?
+## API Endpoints
 
-Yes, you can!
+### Root Endpoint
+- **GET /** - Check if the API is running
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### Prediction Endpoints
+- **POST /predict/cnn** - Make predictions using the CNN model
+- **POST /predict/effnet** - Make predictions using the EfficientNet model
+- **POST /predict/vgg** - Make predictions using the VGG16 model
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+## Making Requests
+
+Send a POST request with an image file in the `file` field using `multipart/form-data` format.
+
+Example response:
+```json
+{
+  "model": "cnn",
+  "predicted_class": 2,
+  "probabilities": [0.1, 0.7, 0.2]
+}
+```
+
+## Frontend Integration
+
+In your frontend application, send requests to the appropriate endpoint based on the model you want to use:
+
+```
+POST http://127.0.0.1:8000/predict/cnn
+POST http://127.0.0.1:8000/predict/effnet
+POST http://127.0.0.1:8000/predict/vgg
+```
+
+Make sure to include the image file in the request body as `multipart/form-data` with the field name `file`.
