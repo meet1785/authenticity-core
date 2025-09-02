@@ -4,9 +4,15 @@
 MODEL_CONFIG = {
     # Local model paths (used when REMOTE_MODEL_SERVER is empty)
     "local": {
-        "cnn": "models/cnn_standalone.keras",
-        "effnet": "models/efficientnet_real_weights.keras",  # Using extracted real weights
-        "vgg": "models/vgg16_real_weights.keras"              # Using extracted real weights
+        "cnn": "models/cnn_standalone.keras",                    # Original working model
+        "effnet": "models/effnet_standalone_authnet.keras",      # Original trained model
+        "vgg": "models/vgg16_standalone_authnet.keras"           # Original trained model
+    },
+    
+    # Fallback models if originals fail to load
+    "fallback": {
+        "effnet": "models/efficientnet_real_weights.keras",     # Extracted weights version
+        "vgg": "models/vgg16_real_weights.keras"                # Extracted weights version
     },
     
     # Remote model server settings

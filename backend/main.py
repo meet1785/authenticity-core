@@ -127,26 +127,28 @@ if not use_remote_models:
                 print(f"❌ CNN model file not found: {cnn_path}")
                 models["cnn"] = _StubModel()
                 
-            # Load VGG model
-            if os.path.exists(vgg_path):
-                vgg_model = safe_load_model(vgg_path, "VGG")
-                if vgg_model is not None:
-                    models["vgg"] = _ModelWrapper(vgg_model, expects_grayscale=False)
-                else:
-                    models["vgg"] = _StubModel()
+            # Load VGG model (try original first, fallback if needed)
+            from original_model_loader import load_original_model_with_fallback
+            
+            vgg_model = load_original_model_with_fallback(
+                vgg_path, 
+                os.path.join(base_dir, MODEL_CONFIG["fallback"]["vgg"]),
+                "VGG"
+            )
+            if vgg_model is not None:
+                models["vgg"] = _ModelWrapper(vgg_model, expects_grayscale=False)
             else:
-                print(f"❌ VGG model file not found: {vgg_path}")
                 models["vgg"] = _StubModel()
             
-            # Load EffNet model (optional)
-            if os.path.exists(effnet_path):
-                effnet_model = safe_load_model(effnet_path, "EffNet")
-                if effnet_model is not None:
-                    models["effnet"] = _ModelWrapper(effnet_model, expects_grayscale=False)
-                else:
-                    models["effnet"] = _StubModel()
+            # Load EffNet model (try original first, fallback if needed)
+            effnet_model = load_original_model_with_fallback(
+                effnet_path,
+                os.path.join(base_dir, MODEL_CONFIG["fallback"]["effnet"]), 
+                "EffNet"
+            )
+            if effnet_model is not None:
+                models["effnet"] = _ModelWrapper(effnet_model, expects_grayscale=False)
             else:
-                print(f"⚠️ EffNet model file not found: {effnet_path}")
                 models["effnet"] = _StubModel()
             
             if not models:
