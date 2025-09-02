@@ -1,6 +1,10 @@
 import numpy as np
-import tensorflow as tf
-import numpy as np
+try:
+    import tensorflow as tf
+    TF_AVAILABLE = True
+except Exception:
+    tf = None
+    TF_AVAILABLE = False
 import cv2
 import base64
 from io import BytesIO
@@ -10,7 +14,13 @@ import matplotlib.pyplot as plt
 
 
 def generate_gradcam_vgg16(img_array, target_size=(224, 224), intensity=0.4):
-    model = tf.keras.models.load_model(r"./models/vgg16_standalone_authnet.keras")
+    import os
+    # If TensorFlow is not available, return None to indicate heatmap generation isn't possible
+    if not TF_AVAILABLE:
+        return {'gradcam_vgg16': None}
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_dir, "models", "vgg16_standalone_authnet.keras")
+    model = tf.keras.models.load_model(model_path)
     
     # Resize + preprocess for VGG16
     img_resized = cv2.resize(img_array, target_size)
@@ -57,7 +67,12 @@ def generate_gradcam_vgg16(img_array, target_size=(224, 224), intensity=0.4):
 
 
 def generate_gradcam_cnn(img_array, target_size=(224, 224), intensity=0.4):
-    model = tf.keras.models.load_model(r"./models/cnn_standalone.keras")
+    import os
+    if not TF_AVAILABLE:
+        return {'gradcam_cnn': None}
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_dir, "models", "cnn_standalone.keras")
+    model = tf.keras.models.load_model(model_path)
     
     # Resize + preprocess for VGG16
     img_resized = cv2.resize(img_array, target_size)
@@ -105,7 +120,12 @@ def generate_gradcam_cnn(img_array, target_size=(224, 224), intensity=0.4):
 
 
 def generate_gradcam_effnet(img_array, target_size=(224, 224), intensity=0.4):
-    model = tf.keras.models.load_model(r"./models/effnet_standalone_authnet.keras")
+    import os
+    if not TF_AVAILABLE:
+        return {'effnet_gradcam': None}
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    model_path = os.path.join(base_dir, "models", "effnet_standalone_authnet.keras")
+    model = tf.keras.models.load_model(model_path)
     
     # Resize + preprocess for VGG16
     img_resized = cv2.resize(img_array, target_size)
@@ -156,9 +176,18 @@ from scipy import stats
 
 
 def majority_pipeline(img_array, IMAGE_SIZE = (224, 224)):
-    vgg16 = tf.keras.models.load_model(r"./models/vgg16_standalone_authnet.keras")
-    cnn = tf.keras.models.load_model(r"./models/cnn_standalone.keras")
-    effnet = tf.keras.models.load_model(r"./models/effnet_standalone_authnet.keras")
+    import os
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    vgg16_path = os.path.join(base_dir, "models", "vgg16_standalone_authnet.keras")
+    cnn_path = os.path.join(base_dir, "models", "cnn_standalone.keras")
+    effnet_path = os.path.join(base_dir, "models", "effnet_standalone_authnet.keras")
+    
+    if not TF_AVAILABLE:
+        raise RuntimeError("TensorFlow is required for majority_pipeline")
+    vgg16 = tf.keras.models.load_model(vgg16_path)
+    cnn = tf.keras.models.load_model(cnn_path)
+    effnet = tf.keras.models.load_model(effnet_path)
     
     img = tf.expand_dims(img_array, axis=0)
 
