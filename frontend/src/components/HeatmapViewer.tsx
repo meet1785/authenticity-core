@@ -43,11 +43,12 @@ export function HeatmapViewer({ imageUrl, heatmapUrl }: HeatmapViewerProps) {
         />
         {showHeatmap && heatmapUrl && (
           <div
-            className="absolute inset-0 rounded-lg opacity-60 mix-blend-hard-light"
+            className="absolute inset-0 rounded-lg opacity-70 mix-blend-overlay"
             style={{
               backgroundImage: `url(${heatmapUrl})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
+              filter: 'contrast(1.8) brightness(1.4) saturate(1.3)',
             }}
           />
         )}

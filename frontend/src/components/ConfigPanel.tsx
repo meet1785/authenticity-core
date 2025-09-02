@@ -25,7 +25,8 @@ export function ConfigPanel({ isOpen, onClose }: ConfigPanelProps) {
   const [enableHeatmap, setEnableHeatmap] = useState(true);
   const [batchMode, setBatchMode] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'testing' | 'connected' | 'error'>('idle');
-  const [selectedModels, setSelectedModels] = useState(['CNN', 'EfficientNet', 'ViT']);
+  // Removed unsupported 'ViT' (backend exposes only cnn, effnet, vgg)
+  const [selectedModels, setSelectedModels] = useState(['CNN', 'EfficientNet', 'VGG16']);
 
   if (!isOpen) return null;
 

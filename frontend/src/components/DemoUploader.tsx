@@ -270,7 +270,7 @@ export function DemoUploader() {
                   originalImage={uploadedImage}
                   cnnHeatmap={result.cnnHeatmap}
                   efficientNetHeatmap={result.efficientNetHeatmap}
-                  vitHeatmap={result.vitHeatmap}
+                  vgg16Heatmap={result.vgg16Heatmap}
                   ensembleHeatmap={result.heatmapUrl}
                   modelHeatmaps={result.modelPredictions
                     .filter(m => m.heatmapUrl)

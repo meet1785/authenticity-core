@@ -8,7 +8,7 @@ interface MultiModelHeatmapProps {
   originalImage: string;
   cnnHeatmap?: string;
   efficientNetHeatmap?: string;
-  vitHeatmap?: string;
+  vgg16Heatmap?: string;
   ensembleHeatmap?: string;
   modelHeatmaps?: { name: string; url: string }[];
 }
@@ -17,7 +17,7 @@ export function MultiModelHeatmap({
   originalImage,
   cnnHeatmap,
   efficientNetHeatmap,
-  vitHeatmap,
+  vgg16Heatmap,
   ensembleHeatmap,
   modelHeatmaps = [],
 }: MultiModelHeatmapProps) {
@@ -32,13 +32,13 @@ export function MultiModelHeatmap({
     
     return (
       <div
-        className="absolute inset-0 rounded-lg mix-blend-multiply"
+        className="absolute inset-0 rounded-lg mix-blend-overlay"
         style={{
           backgroundImage: `url(${heatmapUrl})`,
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           opacity: opacity / 100,
-          filter: 'contrast(1.5) brightness(1.2)',
+          filter: 'contrast(1.8) brightness(1.4) saturate(1.3)',
         }}
       />
     );
@@ -106,24 +106,24 @@ export function MultiModelHeatmap({
           </div>
         </Card>
 
-        {/* ViT */}
+        {/* VGG16 */}
         <Card className="overflow-hidden">
           <div className="p-4">
             <div className="flex items-center gap-2 mb-3">
               <Eye className="h-4 w-4 text-secondary" />
-              <h4 className="font-semibold">ViT</h4>
-              <Badge variant="outline" className="ml-auto">Transformer</Badge>
+              <h4 className="font-semibold">VGG16</h4>
+              <Badge variant="outline" className="ml-auto">Deep CNN</Badge>
             </div>
             <div className="relative aspect-square">
               <img
                 src={originalImage}
-                alt="ViT Analysis"
+                alt="VGG16 Analysis"
                 className="w-full h-full object-cover rounded-lg"
               />
-              <HeatmapOverlay heatmapUrl={vitHeatmap} />
+              <HeatmapOverlay heatmapUrl={vgg16Heatmap} />
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              Vision Transformer model
+              VGG16 deep convolutional network
             </p>
           </div>
         </Card>
@@ -146,7 +146,7 @@ export function MultiModelHeatmap({
             <HeatmapOverlay heatmapUrl={ensembleHeatmap} />
           </div>
           <p className="text-sm text-muted-foreground mt-3">
-            Consensus from CNN, EfficientNet, and ViT models
+            Consensus from CNN, EfficientNet, and VGG16 models
           </p>
         </div>
       </Card>

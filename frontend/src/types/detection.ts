@@ -13,7 +13,7 @@ export interface DetectionResult {
   heatmapUrl?: string; // Ensemble heatmap
   cnnHeatmap?: string;
   efficientNetHeatmap?: string;
-  vitHeatmap?: string;
+  vgg16Heatmap?: string;
   timestamp: string;
   imageUrl?: string;
 }

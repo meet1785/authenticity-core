@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { DetectionResult } from '@/types/detection';
 
-// FastAPI backend configuration
-const API_BASE_URL = localStorage.getItem('api_base_url') || '';
+// FastAPI backend configuration (fallback to local dev URL if not set yet)
+const API_BASE_URL = localStorage.getItem('api_base_url') || 'http://localhost:8000';
 const API_KEY = localStorage.getItem('api_key') || '';
 
 const api = axios.create({
@@ -94,7 +94,7 @@ export async function detectDeepfakeAPI(
         `data:image/png;base64,${predictions.find(p => p.model === 'cnn')!.heatmap}` : undefined,
       efficientNetHeatmap: predictions.find(p => p.model === 'effnet')?.heatmap ? 
         `data:image/png;base64,${predictions.find(p => p.model === 'effnet')!.heatmap}` : undefined,
-      vitHeatmap: predictions.find(p => p.model === 'vgg')?.heatmap ? 
+      vgg16Heatmap: predictions.find(p => p.model === 'vgg')?.heatmap ? 
         `data:image/png;base64,${predictions.find(p => p.model === 'vgg')!.heatmap}` : undefined,
       timestamp: new Date().toISOString(),
       imageUrl: imageData instanceof File ? URL.createObjectURL(imageData) : imageData,
