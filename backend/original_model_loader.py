@@ -23,10 +23,16 @@ class OriginalModelLoader:
             # First try direct loading
             self.model = tf.keras.models.load_model(self.model_path)
             print(f"✅ {self.model_name} loaded directly")
+            
+            # Check input shape
+            if len(self.model.input_shape) == 4 and self.model.input_shape[-1] == 1:
+                self.requires_special_input = True
+                print(f"🔧 {self.model_name} expects grayscale input, will convert")
             return True
             
         except Exception as e:
-            if "stem_conv" in str(e) and "expected axis -1" in str(e):
+            error_str = str(e).lower()
+            if "input shape" in error_str or "stem_conv" in error_str or "expected axis" in error_str:
                 print(f"🔧 {self.model_name} has input shape issue - creating wrapper")
                 return self._create_input_wrapper()
             else:
@@ -36,32 +42,38 @@ class OriginalModelLoader:
     def _create_input_wrapper(self):
         """Create a wrapper that fixes input shape issues"""
         try:
-            # Create a simple wrapper model that handles input conversion
-            from tensorflow.keras.layers import Lambda, Input
-            from tensorflow.keras.models import Model
+            # Try to load the model with compile=False to inspect
+            model = tf.keras.models.load_model(self.model_path, compile=False)
             
-            # Create input layer with proper shape
-            input_layer = Input(shape=(224, 224, 3), name='wrapper_input')
-            
-            # Add preprocessing to convert RGB to grayscale if needed
-            def preprocess_input(x):
-                # Try different preprocessing approaches
-                if len(x.shape) == 4 and x.shape[-1] == 3:
-                    # RGB input - convert to what the model expects
-                    # Method 1: Convert to grayscale
-                    gray = tf.reduce_mean(x, axis=-1, keepdims=True)
-                    # Method 2: Resize to 225x225 if needed
-                    resized = tf.image.resize(gray, [225, 225])
-                    return resized
-                return x
-            
-            processed = Lambda(preprocess_input, name='input_preprocessor')(input_layer)
-            
-            # This is a conceptual approach - the original models are corrupted at a deeper level
-            # For now, return False to use the fallback models
-            self.requires_special_input = True
-            return False
-            
+            if len(model.input_shape) == 4:
+                if model.input_shape[-1] == 1:
+                    # Model expects grayscale, create wrapper to convert RGB to grayscale
+                    from tensorflow.keras.layers import Input, Lambda
+                    from tensorflow.keras.models import Model
+                    
+                    input_layer = Input(shape=(224, 224, 3))
+                    # Convert RGB to grayscale using standard weights
+                    gray = Lambda(lambda x: tf.reduce_sum(x * tf.constant([0.2989, 0.5870, 0.1140]), axis=-1, keepdims=True))(input_layer)
+                    output = model(gray)
+                    new_model = Model(input_layer, output)
+                    
+                    self.model = new_model
+                    self.requires_special_input = True
+                    print(f"✅ Created RGB to grayscale wrapper for {self.model_name}")
+                    return True
+                    
+                elif model.input_shape[-1] == 3:
+                    # Model expects RGB, use directly
+                    self.model = model
+                    print(f"✅ {self.model_name} loaded with RGB input")
+                    return True
+                else:
+                    print(f"❌ Unsupported input channels for {self.model_name}: {model.input_shape[-1]}")
+                    return False
+            else:
+                print(f"❌ Unexpected input shape for {self.model_name}: {model.input_shape}")
+                return False
+                
         except Exception as e:
             print(f"❌ Could not create wrapper for {self.model_name}: {e}")
             return False
