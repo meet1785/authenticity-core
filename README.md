@@ -1,137 +1,93 @@
-# AuthNet - AI Image Authenticity Verification System
+# AuthenticityNet
 
-An AI-powered system for detecting image authenticity using deep learning models (CNN, EfficientNet, VGG16).
+AuthenticityNet is an AI-powered image authenticity verification system that uses multiple deep learning models (CNN, EfficientNet, and VGG16) to analyze and classify images. The system consists of a React frontend, FastAPI backend, and supports both local and distributed deployment options.
 
-## 🚀 Features
-
-- **Multi-Model Detection**: Uses three different deep learning models for robust analysis
-- **React Frontend**: Modern, responsive web interface
-- **FastAPI Backend**: High-performance Python API
-- **Distributed Deployment**: Support for running models on separate servers
-- **Real-time Analysis**: Instant results with confidence scores
-
-## 📁 Project Structure
+## Project Structure
 
 ```
-AuthNet/
-├── backend/                    # FastAPI server
-│   ├── main.py                # Main API server
-│   ├── model_server.py       # Model hosting server
-│   ├── config.py              # Configuration settings
-│   ├── requirements.txt       # Python dependencies
-│   ├── models/                # AI model files (see below)
-│   └── *.bat                  # Windows startup scripts
-├── frontend/                   # React application
-│   └── authenticity-core/     # Vite React app
-├── SETUP_GUIDE.md            # Complete setup instructions
-└── FRONTEND_CONNECTION.md    # Frontend-backend integration guide
+├── frontend/
+│   └── authenticity-core/     # React frontend application
+├── models/
+│   ├── cnn_standalone.keras
+│   ├── effnet_standalone_authnet.keras
+│   └── vgg16_standalone_authnet.keras
+├── config.py                  # Configuration settings
+├── main.py                    # Backend API server
+├── model_server.py            # Optional remote model server
+├── requirements.txt           # Python dependencies
+├── SETUP_GUIDE.md            # Detailed setup instructions
+├── start_all.bat             # Script to start both backend and frontend
+├── start_backend.bat         # Script to start the backend
+├── start_frontend.bat        # Script to start the frontend
+├── start_model_server.bat    # Script to start the model server
+├── test_connection.py        # Utility to test model server connection
+└── README.md                 # This file
 ```
 
-## 🛠️ Quick Setup
+## Quick Start
 
-### Prerequisites
-- Python 3.8+ with pip
-- Node.js 16+ with npm
-- Git
+For the easiest setup, use the provided batch files:
 
-### 1. Clone the Repository
+1. **One-Click Setup (Backend + Frontend)**:
+   ```
+   start_all.bat
+   ```
+   This will start both the backend and frontend in separate windows.
+
+2. **Backend Only**:
+   ```
+   start_backend.bat
+   ```
+   When prompted, enter the model server URL or leave empty for local models.
+
+3. **Frontend Only**:
+   ```
+   start_frontend.bat
+   ```
+
+For detailed setup instructions, including distributed deployment options, see [SETUP_GUIDE.md](SETUP_GUIDE.md).
+
+## Running the Backend
+
+Start the server with:
 ```bash
-git clone https://github.com/meetshah1708/authenticity-core.git
-cd authenticity-core
+uvicorn main:app --reload
 ```
 
-### 2. Backend Setup
-```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate  # On Windows
-pip install -r requirements.txt
+The backend will be available at:
+- http://127.0.0.1:8000
+
+## API Endpoints
+
+### Root Endpoint
+- **GET /** - Check if the API is running
+
+### Prediction Endpoints
+- **POST /predict/cnn** - Make predictions using the CNN model
+- **POST /predict/effnet** - Make predictions using the EfficientNet model
+- **POST /predict/vgg** - Make predictions using the VGG16 model
+
+## Making Requests
+
+Send a POST request with an image file in the `file` field using `multipart/form-data` format.
+
+Example response:
+```json
+{
+  "model": "cnn",
+  "predicted_class": 2,
+  "probabilities": [0.1, 0.7, 0.2]
+}
 ```
 
-### 3. Frontend Setup
-```bash
-cd ../frontend/authenticity-core
-npm install
-npm run dev
+## Frontend Integration
+
+In your frontend application, send requests to the appropriate endpoint based on the model you want to use:
+
+```
+POST http://127.0.0.1:8000/predict/cnn
+POST http://127.0.0.1:8000/predict/effnet
+POST http://127.0.0.1:8000/predict/vgg
 ```
 
-### 4. Download AI Models
-
-The AI model files are too large for GitHub and need to be downloaded separately:
-
-**Option 1: Download from Google Drive**
-- [CNN Model](https://drive.google.com/file/d/your-cnn-model-link)
-- [EfficientNet Model](https://drive.google.com/file/d/your-effnet-model-link)
-- [VGG16 Model](https://drive.google.com/file/d/your-vgg-model-link)
-
-**Option 2: Train Your Own Models**
-See the training scripts in the `backend/` directory.
-
-Place the downloaded `.keras` files in the `backend/models/` directory.
-
-### 5. Run the Application
-
-**Local Setup (All-in-One):**
-```bash
-# Start backend with local models
-python main.py
-
-# In another terminal, start frontend
-cd frontend/authenticity-core
-npm run dev
-```
-
-**Distributed Setup:**
-```bash
-# Start model server (on your friend's machine)
-python model_server.py
-
-# Start backend (on your machine)
-python main.py
-
-# Start frontend (on your machine)
-cd frontend/authenticity-core
-npm run dev
-```
-
-## 🌐 Access the Application
-
-- **Frontend**: http://localhost:5173
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-
-## 📋 API Endpoints
-
-- `POST /predict/cnn` - CNN model prediction
-- `POST /predict/effnet` - EfficientNet prediction
-- `POST /predict/vgg` - VGG16 prediction
-- `GET /health` - Health check
-
-## 🔧 Configuration
-
-Edit `backend/config.py` to:
-- Set model server URLs for distributed setup
-- Configure CORS settings
-- Adjust preprocessing parameters
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## 📄 License
-
-[Add your license information here]
-
-## 📞 Support
-
-For questions or issues:
-- Check the [SETUP_GUIDE.md](SETUP_GUIDE.md) for detailed instructions
-- Review [FRONTEND_CONNECTION.md](FRONTEND_CONNECTION.md) for integration details
-- Open an issue on GitHub
-
----
-
-**Note**: This repository contains the source code only. AI model files must be downloaded separately due to size limitations.
+Make sure to include the image file in the request body as `multipart/form-data` with the field name `file`.

@@ -1,0 +1,243 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* Core colors - Dark theme by default */
+    --background: 220 40% 3%;
+    --foreground: 210 20% 98%;
+
+    --card: 220 40% 6%;
+    --card-foreground: 210 20% 98%;
+    
+    --popover: 220 40% 8%;
+    --popover-foreground: 210 20% 98%;
+
+    /* Brand colors - Cyan/Blue with security focus */
+    --primary: 195 100% 50%;
+    --primary-foreground: 220 40% 3%;
+    --primary-glow: 195 100% 65%;
+    
+    --secondary: 220 40% 12%;
+    --secondary-foreground: 210 20% 98%;
+    
+    --muted: 220 30% 15%;
+    --muted-foreground: 210 15% 60%;
+
+    --accent: 280 100% 65%;
+    --accent-foreground: 220 40% 3%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 20% 98%;
+
+    --border: 220 30% 18%;
+    --input: 220 30% 18%;
+    --ring: 195 100% 50%;
+
+    --radius: 0.75rem;
+
+    /* Custom design tokens */
+    --gradient-primary: linear-gradient(135deg, hsl(195 100% 50%), hsl(280 100% 65%));
+    --gradient-secondary: linear-gradient(135deg, hsl(220 40% 12%), hsl(220 40% 6%));
+    --gradient-accent: linear-gradient(135deg, hsl(280 100% 65%), hsl(195 100% 50%));
+    --gradient-mesh: radial-gradient(at 40% 20%, hsl(195 100% 50% / 0.2) 0px, transparent 50%),
+                     radial-gradient(at 80% 0%, hsl(280 100% 65% / 0.15) 0px, transparent 50%),
+                     radial-gradient(at 0% 95%, hsl(195 100% 50% / 0.1) 0px, transparent 50%);
+    
+    --shadow-sm: 0 1px 2px 0 hsl(220 40% 3% / 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(220 40% 3% / 0.1);
+    --shadow-lg: 0 10px 15px -3px hsl(220 40% 3% / 0.2);
+    --shadow-xl: 0 20px 25px -5px hsl(220 40% 3% / 0.3);
+    --shadow-glow: 0 0 40px hsl(195 100% 50% / 0.3);
+    --shadow-glow-accent: 0 0 40px hsl(280 100% 65% / 0.3);
+    
+    --transition-base: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-fast: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+
+    --sidebar-background: 220 40% 4%;
+    --sidebar-foreground: 210 20% 98%;
+    --sidebar-primary: 195 100% 50%;
+    --sidebar-primary-foreground: 220 40% 3%;
+    --sidebar-accent: 220 40% 10%;
+    --sidebar-accent-foreground: 210 20% 98%;
+    --sidebar-border: 220 30% 18%;
+    --sidebar-ring: 195 100% 50%;
+  }
+
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 220 40% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 40% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 40% 10%;
+
+    --primary: 195 100% 40%;
+    --primary-foreground: 0 0% 100%;
+    --primary-glow: 195 100% 50%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 220 40% 10%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 20% 46%;
+
+    --accent: 280 100% 55%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 195 100% 40%;
+    
+    --gradient-primary: linear-gradient(135deg, hsl(195 100% 40%), hsl(280 100% 55%));
+    --gradient-secondary: linear-gradient(135deg, hsl(210 40% 96%), hsl(210 40% 90%));
+    --gradient-accent: linear-gradient(135deg, hsl(280 100% 55%), hsl(195 100% 40%));
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+  }
+}
+@layer components {
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-primary);
+  }
+
+  .gradient-border {
+    @apply relative;
+    background: var(--gradient-primary);
+    padding: 1px;
+    border-radius: var(--radius);
+  }
+
+  .glass-effect {
+    @apply backdrop-blur-xl bg-card/50 border border-border/50;
+  }
+
+  .glass-panel {
+    @apply backdrop-blur-2xl bg-gradient-to-br from-card/80 via-card/60 to-card/40 border border-border/50;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+  }
+
+  .glow-effect {
+    box-shadow: var(--shadow-glow);
+  }
+
+  .glow-effect-accent {
+    box-shadow: var(--shadow-glow-accent);
+  }
+
+  .mesh-gradient {
+    background-image: var(--gradient-mesh);
+  }
+  
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  .neon-border {
+    @apply relative overflow-hidden rounded-lg;
+    background: linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent))) padding-box,
+                linear-gradient(90deg, hsl(var(--primary)), hsl(var(--accent))) border-box;
+    border: 2px solid transparent;
+  }
+
+  .hover-lift {
+    @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl;
+  }
+
+  .status-indicator {
+    @apply relative inline-flex h-3 w-3;
+  }
+
+  .status-indicator::before {
+    @apply absolute inline-flex h-full w-full animate-ping rounded-full opacity-75;
+    content: "";
+    background-color: currentColor;
+  }
+
+  .status-indicator::after {
+    @apply relative inline-flex h-3 w-3 rounded-full;
+    content: "";
+    background-color: currentColor;
+  }
+}
+
+@layer utilities {
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-20px); }
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  @keyframes gradient-shift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+
+  @keyframes slide-up {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -1000px 0; }
+    100% { background-position: 1000px 0; }
+  }
+
+  @keyframes orbit {
+    from { transform: rotate(0deg) translateX(150px) rotate(0deg); }
+    to { transform: rotate(360deg) translateX(150px) rotate(-360deg); }
+  }
+
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: gradient-shift 3s ease infinite;
+  }
+
+  .animate-slide-up {
+    animation: slide-up 0.5s ease-out;
+  }
+
+  .animate-shimmer {
+    background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / 0.1) 50%, transparent 100%);
+    background-size: 1000px 100%;
+    animation: shimmer 2s infinite;
+  }
+
+  .animate-orbit {
+    animation: orbit 20s linear infinite;
+  }
+}
