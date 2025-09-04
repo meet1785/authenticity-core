@@ -185,6 +185,124 @@ def preprocess_image(file, target_size=None):
         
     return img_array
 
+# New ensemble prediction endpoint (must come before generic predict route)
+@app.post("/predict/ensemble")
+async def predict_ensemble(file: UploadFile = File(...), threshold: float = 0.5, include_heatmaps: bool = True):
+    """Run all available models and return aggregated (majority vote) decision.
+
+    Returns per-model predictions plus ensemble stats. Uses same threshold handling
+    for sigmoid models. If a model failed to load (stub) it's still included but
+    flagged in the response. Heatmaps generated only for real models when requested.
+    """
+    if not 0.1 <= threshold <= 0.9:
+        raise HTTPException(status_code=400, detail="Threshold must be between 0.1 and 0.9")
+
+    contents = await file.read()
+
+    # Remote forwarding (if configured)
+    if use_remote_models:
+        try:
+            remote_url = f"{MODEL_CONFIG['remote']['server_url']}/predict/ensemble"
+            headers = {}
+            if MODEL_CONFIG['remote']['api_key']:
+                headers['Authorization'] = f"Bearer {MODEL_CONFIG['remote']['api_key']}"
+            files = {'file': (file.filename, contents, file.content_type)}
+            response = requests.post(remote_url, files=files, headers=headers, timeout=MODEL_CONFIG['remote']['timeout'])
+            if response.status_code == 200:
+                return response.json()
+            raise HTTPException(status_code=response.status_code, detail=f"Remote ensemble error: {response.text}")
+        except requests.RequestException as e:
+            raise HTTPException(status_code=503, detail=f"Error connecting to remote model server: {str(e)}")
+
+    if not models:
+        raise HTTPException(status_code=503, detail="No models loaded")
+
+    img_array = preprocess_image(contents)
+
+    per_model = []
+    fake_votes = 0
+
+    # For heatmaps reuse original image array before preprocessing for Grad-CAM
+    raw_img_for_gradcam = None
+    if include_heatmaps:
+        try:
+            raw_img_for_gradcam = toImageArray(io.BytesIO(contents))
+        except Exception:
+            raw_img_for_gradcam = None
+
+    for name in ["cnn", "effnet", "vgg"]:
+        if name not in models:
+            continue
+        model_obj = models[name]
+        try:
+            prediction = model_obj.predict(img_array)
+            prediction_flat = prediction.flatten()
+            if len(prediction_flat) == 1:
+                sigmoid_prob = float(prediction_flat[0])
+                probabilities = [1.0 - sigmoid_prob, sigmoid_prob]
+                predicted_class = 1 if sigmoid_prob > threshold else 0
+                fake_confidence = sigmoid_prob
+            else:
+                probabilities = prediction.tolist()[0]
+                predicted_class = int(np.argmax(prediction, axis=1)[0])
+                fake_confidence = probabilities[1] if len(probabilities) > 1 else 0.5
+
+            if predicted_class == 1:
+                fake_votes += 1
+
+            heatmap_b64 = None
+            if include_heatmaps and raw_img_for_gradcam is not None and not isinstance(model_obj, _StubModel):
+                try:
+                    actual_model = model_obj.model if hasattr(model_obj, 'model') else model_obj
+                    heatmap_b64 = generate_improved_gradcam(
+                        actual_model,
+                        raw_img_for_gradcam,
+                        model_type="cnn" if name == "cnn" else ("effnet" if name == "effnet" else "vgg")
+                    )
+                except Exception:
+                    heatmap_b64 = None
+
+            per_model.append({
+                "model": name,
+                "predicted_class": predicted_class,
+                "probabilities": probabilities,
+                "probability": fake_confidence,
+                "heatmap": heatmap_b64,
+                "stub": isinstance(model_obj, _StubModel)
+            })
+        except Exception as e:
+            per_model.append({
+                "model": name,
+                "error": str(e),
+                "stub": isinstance(model_obj, _StubModel)
+            })
+
+    total_models = sum(1 for m in per_model if 'predicted_class' in m)
+    if total_models == 0:
+        raise HTTPException(status_code=500, detail="All model predictions failed")
+
+    # Majority vote decision (ties -> real)
+    majority_fake = fake_votes > (total_models / 2)
+
+    # Ensemble confidence: average of fake probabilities (for models that produced probabilities)
+    fake_probs = [m.get('probabilities', [None, None])[1] for m in per_model if m.get('probabilities') and len(m['probabilities']) > 1]
+    if not fake_probs:
+        # Fallback: use single-output probabilities if available
+        fake_probs = [m.get('probability') for m in per_model if m.get('probability') is not None]
+    ensemble_confidence = float(np.mean(fake_probs)) if fake_probs else 0.5
+
+    return {
+        "models": per_model,
+        "ensemble": {
+            "majority_label": "fake" if majority_fake else "real",
+            "majority_class": 1 if majority_fake else 0,
+            "fake_votes": fake_votes,
+            "total_models": total_models,
+            "ensemble_confidence": ensemble_confidence,
+            "threshold": threshold
+        }
+    }
+
 @app.post("/predict/{model_name}")
 async def predict(model_name: str, file: UploadFile = File(...), threshold: float = 0.5):
     # Accept both 'vgg' and 'vgg16' for compatibility
@@ -340,123 +458,7 @@ async def predict(model_name: str, file: UploadFile = File(...), threshold: floa
             detail=f"Error processing with local model: {str(e)}"
         )
 
-# New ensemble prediction endpoint
-@app.post("/predict/ensemble")
-async def predict_ensemble(file: UploadFile = File(...), threshold: float = 0.5, include_heatmaps: bool = True):
-    """Run all available models and return aggregated (majority vote) decision.
 
-    Returns per-model predictions plus ensemble stats. Uses same threshold handling
-    for sigmoid models. If a model failed to load (stub) it's still included but
-    flagged in the response. Heatmaps generated only for real models when requested.
-    """
-    if not 0.1 <= threshold <= 0.9:
-        raise HTTPException(status_code=400, detail="Threshold must be between 0.1 and 0.9")
-
-    contents = await file.read()
-
-    # Remote forwarding (if configured)
-    if use_remote_models:
-        try:
-            remote_url = f"{MODEL_CONFIG['remote']['server_url']}/predict/ensemble"
-            headers = {}
-            if MODEL_CONFIG['remote']['api_key']:
-                headers['Authorization'] = f"Bearer {MODEL_CONFIG['remote']['api_key']}"
-            files = {'file': (file.filename, contents, file.content_type)}
-            response = requests.post(remote_url, files=files, headers=headers, timeout=MODEL_CONFIG['remote']['timeout'])
-            if response.status_code == 200:
-                return response.json()
-            raise HTTPException(status_code=response.status_code, detail=f"Remote ensemble error: {response.text}")
-        except requests.RequestException as e:
-            raise HTTPException(status_code=503, detail=f"Error connecting to remote model server: {str(e)}")
-
-    if not models:
-        raise HTTPException(status_code=503, detail="No models loaded")
-
-    img_array = preprocess_image(contents)
-
-    per_model = []
-    fake_votes = 0
-
-    # For heatmaps reuse original image array before preprocessing for Grad-CAM
-    raw_img_for_gradcam = None
-    if include_heatmaps:
-        try:
-            raw_img_for_gradcam = toImageArray(io.BytesIO(contents))
-        except Exception:
-            raw_img_for_gradcam = None
-
-    for name in ["cnn", "effnet", "vgg"]:
-        if name not in models:
-            continue
-        model_obj = models[name]
-        try:
-            prediction = model_obj.predict(img_array)
-            prediction_flat = prediction.flatten()
-            if len(prediction_flat) == 1:
-                sigmoid_prob = float(prediction_flat[0])
-                probabilities = [1.0 - sigmoid_prob, sigmoid_prob]
-                predicted_class = 1 if sigmoid_prob > threshold else 0
-                fake_confidence = sigmoid_prob
-            else:
-                probabilities = prediction.tolist()[0]
-                predicted_class = int(np.argmax(prediction, axis=1)[0])
-                fake_confidence = probabilities[1] if len(probabilities) > 1 else 0.5
-
-            if predicted_class == 1:
-                fake_votes += 1
-
-            heatmap_b64 = None
-            if include_heatmaps and raw_img_for_gradcam is not None and not isinstance(model_obj, _StubModel):
-                try:
-                    actual_model = model_obj.model if hasattr(model_obj, 'model') else model_obj
-                    heatmap_b64 = generate_improved_gradcam(
-                        actual_model,
-                        raw_img_for_gradcam,
-                        model_type="cnn" if name == "cnn" else ("effnet" if name == "effnet" else "vgg")
-                    )
-                except Exception:
-                    heatmap_b64 = None
-
-            per_model.append({
-                "model": name,
-                "predicted_class": predicted_class,
-                "probabilities": probabilities,
-                "probability": fake_confidence,
-                "heatmap": heatmap_b64,
-                "stub": isinstance(model_obj, _StubModel)
-            })
-        except Exception as e:
-            per_model.append({
-                "model": name,
-                "error": str(e),
-                "stub": isinstance(model_obj, _StubModel)
-            })
-
-    total_models = sum(1 for m in per_model if 'predicted_class' in m)
-    if total_models == 0:
-        raise HTTPException(status_code=500, detail="All model predictions failed")
-
-    # Majority vote decision (ties -> real)
-    majority_fake = fake_votes > (total_models / 2)
-
-    # Ensemble confidence: average of fake probabilities (for models that produced probabilities)
-    fake_probs = [m.get('probabilities', [None, None])[1] for m in per_model if m.get('probabilities') and len(m['probabilities']) > 1]
-    if not fake_probs:
-        # Fallback: use single-output probabilities if available
-        fake_probs = [m.get('probability') for m in per_model if m.get('probability') is not None]
-    ensemble_confidence = float(np.mean(fake_probs)) if fake_probs else 0.5
-
-    return {
-        "models": per_model,
-        "ensemble": {
-            "majority_label": "fake" if majority_fake else "real",
-            "majority_class": 1 if majority_fake else 0,
-            "fake_votes": fake_votes,
-            "total_models": total_models,
-            "ensemble_confidence": ensemble_confidence,
-            "threshold": threshold
-        }
-    }
 
 # Improved GradCAM function that works with pre-loaded models
 def generate_improved_gradcam(actual_model, img_array, model_type="cnn", target_size=(224, 224), intensity=0.4):
