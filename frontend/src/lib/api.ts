@@ -14,13 +14,11 @@ const api = axios.create({
 });
 
 // Gemini API configuration
-const GEMINI_API_KEY = localStorage.getItem('gemini_api_key') || 'AIzaSyC4xAN7n2EalbUwGZ-1Ah1Zq0xAg1xxKNE';
+const GEMINI_API_KEY = localStorage.getItem('gemini_api_key') || 'AIzaSyC4xAN7n2EalbUwGZ-1Ah1Zq0xAg1xxKNE'; // Replace with your actual API key
 const GEMINI_MODELS = [
-  'gemini-1.5-flash', // Test with known working model first
-  'gemini-2.5-flash', // Latest and fastest
-  'gemini-2.5-pro',   // Latest pro version
-  'gemini-2.0-flash', // Previous generation
-  'gemini-1.5-pro'    // Final fallback
+  'gemini-1.5-flash', // Fast and efficient
+  'gemini-1.5-pro',   // More capable
+  'gemini-1.0-pro'    // Fallback
 ];
 
 // Rate limiting for Gemini API
@@ -194,6 +192,14 @@ export async function analyzeWithGemini(
   prediction: string,
   confidence: number
 ): Promise<string> {
+  console.log('🔍 Gemini Analysis - Input:', { prediction, confidence, confidenceType: typeof confidence });
+  
+  // Validate confidence value
+  if (typeof confidence !== 'number' || isNaN(confidence)) {
+    console.warn('Invalid confidence value for Gemini analysis:', confidence);
+    confidence = 50; // Default fallback
+  }
+  
   if (!GEMINI_API_KEY) {
     return "Gemini API key not configured. Enhanced analysis unavailable.";
   }
@@ -215,9 +221,18 @@ export async function analyzeWithGemini(
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const prompt = `Analyze this image for potential deepfake characteristics. The AI model has classified it as: ${prediction} with ${confidence}% confidence.
+        const prompt = `Analyze this image for potential deepfake characteristics. The AI model has classified it as: ${prediction} with ${confidence.toFixed(1)}% confidence in it being fake.
 
-Please provide a brief analysis of visual indicators that support or contradict this classification.`;
+Please provide a brief analysis of visual indicators that support or contradict this classification. Consider:
+- Confidence levels: High (70%+) suggests strong evidence of manipulation, Medium (40-70%) indicates uncertainty, Low (<40%) suggests likely authentic
+- Facial artifacts or inconsistencies (blurring, asymmetry, unnatural skin texture)
+- Lighting and shadow patterns (inconsistent illumination, unnatural shadows)
+- Skin texture and eye reflections (artificial smoothness, missing corneal reflections)
+- Any other suspicious elements (background inconsistencies, unnatural edges)
+
+Keep your response concise and focused on the most relevant visual evidence.`;
+
+        console.log('🤖 Gemini Prompt:', prompt);
 
         // Debug: Check image data format
         const imageBase64 = imageData.split(',')[1];
