@@ -42,20 +42,25 @@ class _StubModel:
         # return a deterministic 2-class softmax-like vector
         return np.array([[0.8, 0.2]])
 
-# Model wrapper to handle input shape conversion
+# Model wrapper to handle input shape conversion - now focuses on 3-channel RGB
 class _ModelWrapper:
     def __init__(self, model, expects_grayscale=False):
         self.model = model
         self.expects_grayscale = expects_grayscale
     
     def predict(self, x):
-        if self.expects_grayscale and x.shape[-1] == 3:
-            # Convert RGB to grayscale for models that expect single channel
-            # Using standard grayscale conversion weights
-            x_gray = np.dot(x[..., :3], [0.2989, 0.5870, 0.1140])
-            x_gray = np.expand_dims(x_gray, axis=-1)
-            return self.model.predict(x_gray)
-        return self.model.predict(x)
+        # Ensure input is 3-channel RGB for all our fixed models
+        if len(x.shape) == 4 and x.shape[-1] == 3:
+            # Input is already 3-channel, proceed normally
+            return self.model.predict(x)
+        elif len(x.shape) == 4 and x.shape[-1] == 1:
+            # Convert single channel to 3-channel
+            x_rgb = np.repeat(x, 3, axis=-1)
+            return self.model.predict(x_rgb)
+        else:
+            # Fallback - should not happen with our preprocessing
+            print(f"⚠️ Unexpected input shape: {x.shape}")
+            return self.model.predict(x)
 
 # Function to safely load models with better error handling
 def safe_load_model(model_path, model_name):
@@ -127,25 +132,17 @@ if not use_remote_models:
                 print(f"❌ CNN model file not found: {cnn_path}")
                 models["cnn"] = _StubModel()
                 
-            # Load VGG model (try original first, fallback if needed)
-            from original_model_loader import load_original_model_with_fallback
+            # Load VGG model using fixed loader
+            from fixed_model_loader import load_fixed_model
             
-            vgg_model = load_original_model_with_fallback(
-                vgg_path, 
-                os.path.join(base_dir, MODEL_CONFIG["fallback"]["vgg"]),
-                "VGG"
-            )
+            vgg_model = load_fixed_model("vgg", vgg_path)
             if vgg_model is not None:
                 models["vgg"] = _ModelWrapper(vgg_model, expects_grayscale=False)
             else:
                 models["vgg"] = _StubModel()
             
-            # Load EffNet model (try original first, fallback if needed)
-            effnet_model = load_original_model_with_fallback(
-                effnet_path,
-                os.path.join(base_dir, MODEL_CONFIG["fallback"]["effnet"]), 
-                "EffNet"
-            )
+            # Load EffNet model using fixed loader
+            effnet_model = load_fixed_model("effnet", effnet_path)
             if effnet_model is not None:
                 models["effnet"] = _ModelWrapper(effnet_model, expects_grayscale=False)
             else:
@@ -164,25 +161,38 @@ if not use_remote_models:
 else:
     print("🌐 Using remote models, skipping local model loading...")
 
-# Preprocess uploaded image
+# Preprocess uploaded image - ensures 3-channel RGB input for all models
 def preprocess_image(file, target_size=None):
     if target_size is None:
         target_size = PREPROCESSING_CONFIG["image_size"]
     
+    # Always convert to RGB to ensure 3 channels
     img = Image.open(io.BytesIO(file)).convert("RGB")
     img = img.resize(target_size)
 
-    # If keras.preprocessing.image is available use it, otherwise fallback to numpy array
-    if image is not None:
-        img_array = image.img_to_array(img)
-    else:
-        img_array = np.array(img, dtype=np.float32)
-
+    # Convert to numpy array ensuring 3 channels
+    img_array = np.array(img, dtype=np.float32)
+    
+    # Ensure we have 3 channels (should be guaranteed by RGB conversion)
+    if len(img_array.shape) == 2:
+        # Grayscale - convert to 3 channels
+        img_array = np.stack([img_array] * 3, axis=-1)
+    elif img_array.shape[-1] == 1:
+        # Single channel - convert to 3 channels  
+        img_array = np.repeat(img_array, 3, axis=-1)
+    elif img_array.shape[-1] == 4:
+        # RGBA - keep only RGB channels
+        img_array = img_array[:, :, :3]
+    
+    # Ensure exactly 3 channels
+    assert img_array.shape[-1] == 3, f"Expected 3 channels, got {img_array.shape[-1]}"
+    
     img_array = np.expand_dims(img_array, axis=0)
     
     if PREPROCESSING_CONFIG["normalize"]:
         img_array /= PREPROCESSING_CONFIG["normalization_factor"]
         
+    print(f"📸 Preprocessed image shape: {img_array.shape}")
     return img_array
 
 # New ensemble prediction endpoint (must come before generic predict route)
