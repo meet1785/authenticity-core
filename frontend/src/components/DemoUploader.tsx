@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from "react";
-import { Upload, Link2, Image, Loader2, X, FileImage, Brain } from "lucide-react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { Upload, Link2, Image, Loader2, X, FileImage, Brain, History as HistoryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -7,7 +7,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { HeatmapViewer } from "./HeatmapViewer";
 import { MultiModelHeatmap } from "./MultiModelHeatmap";
-import { DetectionResult } from "@/types/detection";
+import { DetectionHistory } from "./DetectionHistory";
+import { DetectionResult, HistoryItem } from "@/types/detection";
 import { detectDeepfake } from "@/lib/detection";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
@@ -21,8 +22,71 @@ export function DemoUploader() {
   const [result, setResult] = useState<DetectionResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedModels, setSelectedModels] = useState<string[]>(['CNN', 'EfficientNet', 'VGG16']);
+  const [activeTab, setActiveTab] = useState("upload");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Set default Gemini API key if not set
+  useEffect(() => {
+    if (!localStorage.getItem('gemini_api_key')) {
+      localStorage.setItem('gemini_api_key', 'AIzaSyC4xAN7n2EalbUwGZ-1Ah1Zq0xAg1xxKNE');
+    }
+  }, []);
+
+  // Save result to history
+  const saveToHistory = useCallback(async (detectionResult: DetectionResult, imageData: string | File) => {
+    try {
+      let imageBase64 = '';
+      let filename = '';
+
+      if (typeof imageData === 'string') {
+        // URL - fetch and convert to base64
+        const response = await fetch(imageData);
+        const blob = await response.blob();
+        imageBase64 = await blobToBase64(blob);
+        filename = 'URL Image';
+      } else {
+        // File - convert to base64
+        imageBase64 = await blobToBase64(imageData);
+        filename = imageData.name;
+      }
+
+      const historyItem: HistoryItem = {
+        id: Date.now().toString(),
+        result: detectionResult,
+        imageData: imageBase64,
+        filename,
+        analysisDate: new Date().toISOString(),
+      };
+
+      const existingHistory = JSON.parse(localStorage.getItem('detection_history') || '[]');
+      const updatedHistory = [historyItem, ...existingHistory].slice(0, 50); // Keep last 50 items
+      localStorage.setItem('detection_history', JSON.stringify(updatedHistory));
+    } catch (error) {
+      console.error('Failed to save to history:', error);
+    }
+  }, []);
+
+  // Convert blob to base64
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Handle viewing history item
+  const handleViewHistoryItem = useCallback((item: HistoryItem) => {
+    setResult(item.result);
+    setUploadedImage(item.imageData);
+    setActiveTab("results");
+    toast({
+      title: "History Loaded",
+      description: "Previous analysis result has been loaded.",
+    });
+  }, [toast]);
 
   const processImage = useCallback(async (imageSource: string | File) => {
     setIsProcessing(true);
@@ -39,9 +103,12 @@ export function DemoUploader() {
       });
       setResult(detectionResult);
       
+      // Save to history
+      await saveToHistory(detectionResult, imageSource);
+      
       toast({
         title: "Analysis Complete",
-        description: `Image classified as ${detectionResult.prediction} with ${detectionResult.ensembleConfidence}% confidence`,
+        description: `Image classified as ${detectionResult.prediction} with ${detectionResult.ensembleConfidence}% ensemble confidence`,
         variant: detectionResult.isDeepfake ? "destructive" : "default",
       });
     } catch (error) {
@@ -124,10 +191,11 @@ export function DemoUploader() {
     <div className="w-full max-w-4xl mx-auto">
       {!uploadedImage ? (
         <Card className="glass-effect border-border/50 p-8">
-          <Tabs defaultValue="upload" className="w-full">
-            <TabsList className="grid w-full grid-cols-2 bg-muted">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsList className="grid w-full grid-cols-3 bg-muted">
               <TabsTrigger value="upload">Upload Image</TabsTrigger>
               <TabsTrigger value="url">Image URL</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
             </TabsList>
             
             <TabsContent value="upload" className="mt-6 space-y-4">
@@ -161,6 +229,42 @@ export function DemoUploader() {
                     </div>
                   ))}
                 </div>
+              </div>
+              
+              {/* API Settings */}
+              <div className="space-y-3 border-t pt-4">
+                <Label className="text-sm font-medium">API Configuration</Label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="api-url" className="text-xs text-muted-foreground">
+                      Backend API URL
+                    </Label>
+                    <Input
+                      id="api-url"
+                      type="url"
+                      placeholder="http://localhost:8000"
+                      defaultValue={localStorage.getItem('api_base_url') || ''}
+                      onChange={(e) => localStorage.setItem('api_base_url', e.target.value)}
+                      className="text-xs"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="gemini-key" className="text-xs text-muted-foreground">
+                      Gemini API Key (Optional)
+                    </Label>
+                    <Input
+                      id="gemini-key"
+                      type="password"
+                      placeholder="Enter your Gemini API key"
+                      defaultValue={localStorage.getItem('gemini_api_key') || ''}
+                      onChange={(e) => localStorage.setItem('gemini_api_key', e.target.value)}
+                      className="text-xs"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Configure your API endpoints. Gemini key enables enhanced AI-powered analysis.
+                </p>
               </div>
               
               <div className="flex flex-col items-center justify-center">
@@ -237,6 +341,10 @@ export function DemoUploader() {
                 </div>
               </div>
             </TabsContent>
+
+            <TabsContent value="history" className="mt-6">
+              <DetectionHistory onViewResult={handleViewHistoryItem} />
+            </TabsContent>
           </Tabs>
         </Card>
       ) : (
@@ -287,42 +395,47 @@ export function DemoUploader() {
                       {result.prediction}
                     </span>
                   </h3>
-                  <p className="text-muted-foreground">
-                    Confidence: {result.ensembleConfidence}%
+                  <p className="text-muted-foreground mb-4">
+                    Ensemble Confidence: {result.ensembleConfidence}%
                   </p>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {result.modelPredictions.map((model) => (
-                    <div
-                      key={model.name}
-                      className="glass-effect rounded-lg p-4"
-                    >
-                      <h4 className="font-medium mb-2">{model.name}</h4>
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Real</span>
-                          <span>{model.realConfidence}%</span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <div
-                            className="bg-primary h-2 rounded-full transition-all"
-                            style={{ width: `${model.realConfidence}%` }}
-                          />
-                        </div>
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">Fake</span>
-                          <span>{model.fakeConfidence}%</span>
-                        </div>
-                        <div className="w-full bg-muted rounded-full h-2">
-                          <div
-                            className="bg-destructive h-2 rounded-full transition-all"
-                            style={{ width: `${model.fakeConfidence}%` }}
-                          />
-                        </div>
+                  
+                  {/* Reasoning Section */}
+                  <div className="bg-muted/50 rounded-lg p-4 text-left">
+                    <h4 className="font-semibold mb-3 text-center">Analysis Reasoning</h4>
+                    <div className="space-y-3 text-sm">
+                      <div>
+                        <p>
+                          <strong>Ensemble Decision:</strong> The image has been analyzed by multiple AI models 
+                          (CNN, EfficientNet, VGG16) working together to provide a comprehensive assessment.
+                        </p>
+                        <p>
+                          <strong>Confidence Level:</strong> {result.ensembleConfidence}% confidence in the 
+                          {result.prediction.toLowerCase()} classification, based on consensus across all models.
+                        </p>
+                        <p>
+                          <strong>Method:</strong> Multiple deep learning architectures were employed to detect 
+                          potential manipulation patterns, artifacts, or inconsistencies that may indicate 
+                          synthetic generation.
+                        </p>
+                        <p>
+                          <strong>Recommendation:</strong> {result.isDeepfake 
+                            ? "This image shows characteristics consistent with AI-generated or manipulated content. Further verification recommended."
+                            : "This image appears authentic based on current analysis. No significant manipulation indicators detected."
+                          }
+                        </p>
                       </div>
+                      
+                      {/* Gemini Enhanced Analysis */}
+                      {result.geminiAnalysis && (
+                        <div className="border-t pt-3 mt-3">
+                          <h5 className="font-medium mb-2 text-primary">🤖 AI-Powered Detailed Analysis</h5>
+                          <div className="text-xs text-muted-foreground whitespace-pre-line">
+                            {result.geminiAnalysis}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  </div>
                 </div>
               </Card>
             </>

@@ -16,4 +16,13 @@ export interface DetectionResult {
   vgg16Heatmap?: string;
   timestamp: string;
   imageUrl?: string;
+  geminiAnalysis?: string; // Enhanced reasoning from Gemini
+}
+
+export interface HistoryItem {
+  id: string;
+  result: DetectionResult;
+  imageData: string; // Base64 encoded image
+  filename?: string;
+  analysisDate: string;
 }

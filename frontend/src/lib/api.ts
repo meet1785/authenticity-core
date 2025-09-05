@@ -13,6 +13,24 @@ const api = axios.create({
   timeout: 30000, // 30 seconds for model inference
 });
 
+// Gemini API configuration
+const GEMINI_API_KEY = localStorage.getItem('gemini_api_key') || 'AIzaSyC4xAN7n2EalbUwGZ-1Ah1Zq0xAg1xxKNE';
+const GEMINI_MODELS = [
+  'gemini-1.5-flash', // Test with known working model first
+  'gemini-2.5-flash', // Latest and fastest
+  'gemini-2.5-pro',   // Latest pro version
+  'gemini-2.0-flash', // Previous generation
+  'gemini-1.5-pro'    // Final fallback
+];
+
+// Rate limiting for Gemini API
+let lastGeminiCall = 0;
+const GEMINI_RATE_LIMIT_MS = 5000; // 5 seconds between calls
+
+function getGeminiUrl(model: string) {
+  return `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+}
+
 export interface ModelPredictionResponse {
   model: string;
   predicted_class: number; // 0 for real, 1+ for fake
@@ -168,4 +186,115 @@ export async function testAPIConnection(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Gemini AI analysis for enhanced reasoning
+export async function analyzeWithGemini(
+  imageData: string,
+  prediction: string,
+  confidence: number
+): Promise<string> {
+  if (!GEMINI_API_KEY) {
+    return "Gemini API key not configured. Enhanced analysis unavailable.";
+  }
+
+  // Rate limiting check
+  const now = Date.now();
+  const timeSinceLastCall = now - lastGeminiCall;
+  if (timeSinceLastCall < GEMINI_RATE_LIMIT_MS) {
+    const waitTime = GEMINI_RATE_LIMIT_MS - timeSinceLastCall;
+    console.log(`Rate limiting Gemini API call. Waiting ${waitTime}ms...`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  lastGeminiCall = Date.now();
+
+  // Try each model in order
+  for (const model of GEMINI_MODELS) {
+    const maxRetries = 2;
+    let lastError: any = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const prompt = `Analyze this image for potential deepfake characteristics. The AI model has classified it as: ${prediction} with ${confidence}% confidence.
+
+Please provide a brief analysis of visual indicators that support or contradict this classification.`;
+
+        // Debug: Check image data format
+        const imageBase64 = imageData.split(',')[1];
+        console.log('Image data length:', imageBase64?.length);
+        console.log('Image data starts with:', imageBase64?.substring(0, 50));
+
+        const response = await axios.post(
+          `${getGeminiUrl(model)}?key=${GEMINI_API_KEY}`,
+          {
+            contents: [
+              {
+                parts: [
+                  { text: prompt },
+                  {
+                    inline_data: {
+                      mime_type: "image/jpeg",
+                      data: imageBase64
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            timeout: 30000 // 30 second timeout
+          }
+        );
+
+        if (response.data.candidates && response.data.candidates[0]) {
+          return response.data.candidates[0].content.parts[0].text;
+        }
+
+        return "Unable to generate enhanced analysis.";
+      } catch (error: any) {
+        lastError = error;
+        console.error(`Gemini API error (${model}, attempt ${attempt}/${maxRetries}):`, error);
+
+        // Check if it's a rate limit error (429)
+        if (error.response?.status === 429) {
+          if (attempt < maxRetries) {
+            // Exponential backoff: wait 2^attempt seconds
+            const waitTime = Math.pow(2, attempt) * 1000;
+            console.log(`Rate limited. Retrying in ${waitTime/1000} seconds...`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            continue;
+          } else {
+            // Try next model instead of giving up
+            break;
+          }
+        }
+
+        // Check for other API errors
+        if (error.response?.status === 400) {
+          console.log(`Model ${model} returned 400 error, trying next model...`);
+          break; // Try next model
+        }
+
+        if (error.response?.status === 403) {
+          console.log(`Model ${model} access denied, trying next model...`);
+          break; // Try next model
+        }
+
+        // For other errors, retry if we have attempts left
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+          continue;
+        }
+
+        // Try next model
+        break;
+      }
+    }
+  }
+
+  // If all models and retries failed
+  return "Failed to generate enhanced analysis with all available Gemini models. Please check your API key and try again later.";
 }
