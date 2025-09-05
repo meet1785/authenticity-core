@@ -2,7 +2,7 @@ import axios from 'axios';
 import { DetectionResult } from '@/types/detection';
 
 // FastAPI backend configuration (fallback to local dev URL if not set yet)
-const API_BASE_URL = localStorage.getItem('api_base_url') || 'http://localhost:8000';
+const API_BASE_URL = localStorage.getItem('api_base_url') || '';
 const API_KEY = localStorage.getItem('api_key') || '';
 
 const api = axios.create({

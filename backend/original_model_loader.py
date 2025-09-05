@@ -52,25 +52,54 @@ class OriginalModelLoader:
         """Create a wrapper that fixes input shape issues"""
         try:
             # The issue is that models fail to load due to input shape mismatches
-            # Let's try to bypass this by loading without instantiating layers
-            print(f"🔧 Attempting alternative loading approach for {self.model_name}")
+            # Let's try to bypass this by creating a functional model with correct input
+            print(f"🔧 Attempting to fix input shape for {self.model_name}")
             
-            # For now, let's try a simpler approach - use the CNN model as a template
-            # but mark this for special handling during preprocessing
-            print(f"⚠️ Using CNN template approach for {self.model_name}")
-            
-            # Load CNN as template (we know it works)
-            import os
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            cnn_path = os.path.join(base_dir, "models/cnn_standalone.keras")
-            
-            if os.path.exists(cnn_path):
-                self.model = tf.keras.models.load_model(cnn_path, compile=False)
-                self.requires_special_input = True  # Mark for special handling
-                print(f"🔄 Using CNN template for {self.model_name} - this is a temporary workaround")
-                return True
-            else:
-                print(f"❌ CNN template not available for {self.model_name}")
+            # Try loading with compile=False first
+            try:
+                temp_model = tf.keras.models.load_model(self.model_path, compile=False)
+                print(f"✅ {self.model_name} loaded with compile=False")
+                
+                # Check if we need to fix the input shape
+                if len(temp_model.input_shape) == 4 and temp_model.input_shape[-1] == 1:
+                    print(f"🔧 {self.model_name} has 1-channel input, creating RGB wrapper")
+                    
+                    # Create a new input layer with 3 channels
+                    new_input = tf.keras.layers.Input(shape=(225, 225, 3))
+                    
+                    # Convert RGB to grayscale by taking mean across channels
+                    grayscale = tf.keras.layers.Lambda(lambda x: tf.reduce_mean(x, axis=-1, keepdims=True))(new_input)
+                    
+                    # Connect to the original model (remove the original input layer)
+                    original_output = temp_model(grayscale)
+                    
+                    # Create new model
+                    self.model = tf.keras.Model(inputs=new_input, outputs=original_output)
+                    print(f"✅ Created RGB wrapper for {self.model_name}")
+                    return True
+                else:
+                    self.model = temp_model
+                    return True
+                    
+            except Exception as e:
+                print(f"❌ Even compile=False failed: {e}")
+                
+                # Try a different approach - load model architecture and weights separately
+                try:
+                    print(f"🔄 Trying alternative loading for {self.model_name}")
+                    # For now, use CNN as fallback since it works
+                    import os
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    cnn_path = os.path.join(base_dir, "models/cnn_standalone.keras")
+                    
+                    if os.path.exists(cnn_path):
+                        self.model = tf.keras.models.load_model(cnn_path, compile=False)
+                        self.requires_special_input = True
+                        print(f"🔄 Using CNN fallback for {self.model_name}")
+                        return True
+                except Exception as e2:
+                    print(f"❌ Fallback also failed: {e2}")
+                    
                 return False
                 
         except Exception as e:
@@ -83,8 +112,10 @@ class OriginalModelLoader:
             raise ValueError(f"Model {self.model_name} not loaded")
             
         if self.requires_special_input:
-            # Apply special preprocessing here
-            pass
+            # For models using CNN fallback, ensure input is in correct format
+            if len(input_data.shape) == 4 and input_data.shape[-1] == 3:
+                # Convert RGB to grayscale for CNN model
+                input_data = tf.reduce_mean(input_data, axis=-1, keepdims=True)
             
         return self.model.predict(input_data)
 
@@ -98,20 +129,10 @@ def load_original_model_with_fallback(primary_path, fallback_path, model_name):
         # For VGG and EfficientNet, let's try loading them directly without the complex wrapper
         if model_name in ["VGG", "EffNet"]:
             print(f"🔄 Trying direct load approach for {model_name}")
-            # Use the CNN model as a working template for these models
-            # This is a temporary solution to get predictions and heatmaps working
-            import os
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            cnn_path = os.path.join(base_dir, "models/cnn_standalone.keras")
+            model = tf.keras.models.load_model(primary_path, compile=False)
+            print(f"✅ Direct load successful for {model_name}")
+            return model
             
-            if os.path.exists(cnn_path):
-                print(f"🔄 Loading CNN template for {model_name} (temporary solution)")
-                model = tf.keras.models.load_model(cnn_path, compile=False)
-                print(f"✅ Loaded {model_name} using CNN template - predictions will work")
-                return model
-            else:
-                print(f"❌ CNN template not found for {model_name}")
-                
     except Exception as e:
         print(f"❌ Direct load failed for {model_name}: {e}")
     

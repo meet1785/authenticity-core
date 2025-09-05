@@ -10,6 +10,8 @@ from PIL import Image
 import io
 import uvicorn
 import os
+from original_model_loader import load_original_model_with_fallback
+from config import MODEL_CONFIG
 
 app = FastAPI(title="AuthNet Model Server")
 
@@ -23,14 +25,13 @@ app.add_middleware(
 )
 
 # Model paths - can be customized by your friend
-MODEL_PATHS = {
-    "cnn": "models/cnn_standalone.keras",
-    "effnet": "models/effnet_standalone_authnet.keras",
-    "vgg": "models/vgg16_standalone_authnet.keras"
-}
+MODEL_PATHS = MODEL_CONFIG["local"]
+
+# Fallback paths
+FALLBACK_PATHS = MODEL_CONFIG["fallback"]
 
 # Image preprocessing settings
-IMAGE_SIZE = (224, 224)
+IMAGE_SIZE = (225, 225)
 NORMALIZE = True
 NORMALIZATION_FACTOR = 255.0
 
@@ -54,12 +55,16 @@ async def startup_event():
     """Load models on startup"""
     try:
         print("Loading models...")
-        for model_name, model_path in MODEL_PATHS.items():
-            if os.path.exists(model_path):
-                models[model_name] = load_model(model_path)
-                print(f"Loaded model: {model_name}")
-            else:
-                print(f"Warning: Model file not found: {model_path}")
+        # Only load the working CNN model
+        if os.path.exists(MODEL_PATHS["cnn"]):
+            models["cnn"] = load_model(MODEL_PATHS["cnn"])
+            print(f"Loaded model: cnn")
+            # Use CNN for all model types since other models have loading issues
+            models["effnet"] = models["cnn"]
+            models["vgg"] = models["cnn"]
+            print("Using CNN model for all predictions (effnet and vgg)")
+        else:
+            print(f"Warning: CNN model file not found: {MODEL_PATHS['cnn']}")
         print("Model loading complete")
     except Exception as e:
         print(f"Error loading models: {e}")
@@ -76,12 +81,16 @@ async def predict(model_name: str, file: UploadFile = File(...)):
     try:
         contents = await file.read()
         img_array = preprocess_image(contents)
-        prediction = models[model_name].predict(img_array)
+        
+        # All models use the same CNN backend
+        actual_model = "cnn"
+        prediction = models[actual_model].predict(img_array)
         predicted_class = int(np.argmax(prediction, axis=1)[0])
         probabilities = prediction.tolist()[0]
         
         return {
             "model": model_name,
+            "actual_model": actual_model,
             "predicted_class": predicted_class,
             "probabilities": probabilities
         }
@@ -95,7 +104,8 @@ def health_check():
     return {
         "status": "ok",
         "loaded_models": loaded_models,
-        "available_models": list(MODEL_PATHS.keys())
+        "available_models": list(MODEL_PATHS.keys()),
+        "note": "All models use CNN backend due to loading issues with original models"
     }
 
 @app.get("/")
@@ -111,6 +121,6 @@ def root():
     }
 
 if __name__ == "__main__":
-    # Run the server on port 8001 by default
-    port = int(os.environ.get("PORT", 8001))
+   
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run("model_server:app", host="0.0.0.0", port=port, reload=True)
