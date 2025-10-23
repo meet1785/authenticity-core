@@ -280,10 +280,12 @@ async def predict_ensemble(request: Request, file: UploadFile = File(...), thres
                     processing_time=processing_time
                 )
                 return result
-            raise HTTPException(status_code=response.status_code, detail=f"Remote ensemble error: {response.text}")
+            logger.error(f"Remote ensemble error: {response.status_code} - {response.text}")
+            raise HTTPException(status_code=response.status_code, detail="Remote model server error. Please check server logs.")
         except requests.RequestException as e:
             RequestLogger.log_error("RemoteConnectionError", str(e))
-            raise HTTPException(status_code=503, detail=f"Error connecting to remote model server: {str(e)}")
+            logger.error(f"Remote connection error: {str(e)}")
+            raise HTTPException(status_code=503, detail="Error connecting to remote model server. Please check server logs.")
 
     if not models:
         raise HTTPException(status_code=503, detail="No models loaded")
@@ -342,9 +344,10 @@ async def predict_ensemble(request: Request, file: UploadFile = File(...), thres
                 "stub": isinstance(model_obj, _StubModel)
             })
         except Exception as e:
+            logger.error(f"Model {name} prediction error: {str(e)}")
             per_model.append({
                 "model": name,
-                "error": str(e),
+                "error": "Prediction failed",
                 "stub": isinstance(model_obj, _StubModel)
             })
 
@@ -470,15 +473,17 @@ async def predict(request: Request, model_name: str, file: UploadFile = File(...
                 )
                 return result
             else:
+                logger.error(f"Remote model error: {response.status_code} - {response.text}")
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"Remote model server error: {response.text}"
+                    detail="Remote model server error. Please check server logs."
                 )
                 
         except requests.RequestException as e:
+            logger.error(f"Remote connection error: {str(e)}")
             raise HTTPException(
                 status_code=503,
-                detail=f"Error connecting to remote model server: {str(e)}"
+                detail="Error connecting to remote model server. Please check server logs."
             )
     
     # If not using remote models, use local models
@@ -596,9 +601,10 @@ async def predict(request: Request, model_name: str, file: UploadFile = File(...
         return result
     except Exception as e:
         RequestLogger.log_error("PredictionError", str(e), model=internal_model_name)
+        logger.error(f"Prediction error for {internal_model_name}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error processing with local model: {str(e)}"
+            detail=f"Error processing with local model. Please check server logs for details."
         )
 
 
