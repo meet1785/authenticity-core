@@ -57,3 +57,31 @@ PREPROCESSING_CONFIG = {
     "normalize": True,
     "normalization_factor": 255.0
 }
+
+# Rate limiting settings
+RATE_LIMIT_CONFIG = {
+    # Maximum requests per minute per IP address
+    "default_limit": "30/minute",
+    "predict_limit": "20/minute",  # More restrictive for prediction endpoints
+    "ensemble_limit": "10/minute",  # Even more restrictive for ensemble (resource-intensive)
+    "enabled": True
+}
+
+# Caching settings
+CACHE_CONFIG = {
+    "enabled": True,
+    "max_size": 100,  # Maximum number of cached predictions
+    "ttl_seconds": 3600,  # Cache TTL: 1 hour
+    "cache_heatmaps": True,  # Whether to cache heatmaps (memory intensive)
+}
+
+# Logging settings
+LOGGING_CONFIG = {
+    "enabled": True,
+    "level": "INFO",  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    "log_requests": True,
+    "log_predictions": True,
+    "log_file": "logs/authnet.log",
+    "max_log_size_mb": 10,
+    "backup_count": 5
+}

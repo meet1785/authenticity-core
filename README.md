@@ -2,6 +2,19 @@
 
 AuthenticityNet is an AI-powered image authenticity verification system that uses multiple deep learning models (CNN, EfficientNet, and VGG16) to analyze and classify images. The system consists of a React frontend, FastAPI backend, and supports both local and distributed deployment options.
 
+## Features
+
+- 🤖 **Multiple AI Models**: CNN, EfficientNet, and VGG16 for accurate deepfake detection
+- 🎯 **Ensemble Predictions**: Majority voting across models for improved accuracy
+- 🔥 **GradCAM Heatmaps**: Visual explanations of model decisions
+- ⚡ **Intelligent Caching**: ~99% faster responses for repeated queries
+- 🛡️ **Rate Limiting**: Protection against abuse with configurable limits
+- 📊 **Structured Logging**: JSON-formatted logs for monitoring and debugging
+- 🌐 **Distributed Support**: Optional remote model server deployment
+- 🎨 **Modern UI**: React-based frontend with real-time analysis
+
+For details on rate limiting and caching, see [RATE_LIMITING_CACHING.md](RATE_LIMITING_CACHING.md).
+
 ## Project Structure
 
 ```

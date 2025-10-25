@@ -1,5 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+import time
+import logging
 try:
     # TensorFlow is optional for development. If unavailable we fall back to stubs so the API can run.
     from tensorflow.keras.models import load_model
@@ -19,16 +24,32 @@ import os
 import cv2
 import base64
 from io import BytesIO
-from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG
+from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG, RATE_LIMIT_CONFIG, CACHE_CONFIG
 from utilities import generate_gradcam_cnn, generate_gradcam_effnet, generate_gradcam_vgg16, toImageArray
+from cache_manager import get_cache
+from logging_config import RequestLogger
+
+# Initialize logging
+logger = logging.getLogger(__name__)
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI()
+
+# Add rate limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Apply CORS settings from config
 app.add_middleware(
     CORSMiddleware,
     **SERVER_CONFIG["cors"]
 )
+
+# Initialize cache
+cache = get_cache()
+logger.info(f"Cache initialized: {cache.get_stats()}")
 
 # Check if we should use remote models
 use_remote_models = bool(MODEL_CONFIG["remote"]["server_url"])
@@ -197,17 +218,45 @@ def preprocess_image(file, target_size=None):
 
 # New ensemble prediction endpoint (must come before generic predict route)
 @app.post("/predict/ensemble")
-async def predict_ensemble(file: UploadFile = File(...), threshold: float = 0.5, include_heatmaps: bool = True):
+@limiter.limit(RATE_LIMIT_CONFIG["ensemble_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+async def predict_ensemble(request: Request, file: UploadFile = File(...), threshold: float = 0.5, include_heatmaps: bool = True):
     """Run all available models and return aggregated (majority vote) decision.
 
     Returns per-model predictions plus ensemble stats. Uses same threshold handling
     for sigmoid models. If a model failed to load (stub) it's still included but
     flagged in the response. Heatmaps generated only for real models when requested.
     """
+    start_time = time.time()
+    client_ip = get_remote_address(request)
+    
+    # Log request
+    RequestLogger.log_request(
+        endpoint="/predict/ensemble",
+        method="POST",
+        client_ip=client_ip,
+        threshold=threshold,
+        include_heatmaps=include_heatmaps
+    )
+    
     if not 0.1 <= threshold <= 0.9:
         raise HTTPException(status_code=400, detail="Threshold must be between 0.1 and 0.9")
 
     contents = await file.read()
+    
+    # Check cache for ensemble prediction
+    cache_key_model = "ensemble"
+    cached_result = cache.get(contents, cache_key_model, threshold)
+    if cached_result is not None:
+        processing_time = time.time() - start_time
+        logger.info(f"Ensemble prediction served from cache (took {processing_time*1000:.2f}ms)")
+        RequestLogger.log_prediction(
+            model="ensemble",
+            predicted_class=cached_result.get("ensemble", {}).get("majority_class", 0),
+            confidence=cached_result.get("ensemble", {}).get("ensemble_confidence", 0.5),
+            cached=True,
+            processing_time=processing_time
+        )
+        return cached_result
 
     # Remote forwarding (if configured)
     if use_remote_models:
@@ -219,10 +268,24 @@ async def predict_ensemble(file: UploadFile = File(...), threshold: float = 0.5,
             files = {'file': (file.filename, contents, file.content_type)}
             response = requests.post(remote_url, files=files, headers=headers, timeout=MODEL_CONFIG['remote']['timeout'])
             if response.status_code == 200:
-                return response.json()
-            raise HTTPException(status_code=response.status_code, detail=f"Remote ensemble error: {response.text}")
+                result = response.json()
+                # Cache the result
+                cache.set(contents, cache_key_model, result, threshold)
+                processing_time = time.time() - start_time
+                RequestLogger.log_prediction(
+                    model="ensemble",
+                    predicted_class=result.get("ensemble", {}).get("majority_class", 0),
+                    confidence=result.get("ensemble", {}).get("ensemble_confidence", 0.5),
+                    cached=False,
+                    processing_time=processing_time
+                )
+                return result
+            logger.error(f"Remote ensemble error: {response.status_code} - {response.text}")
+            raise HTTPException(status_code=response.status_code, detail="Remote model server error. Please check server logs.")
         except requests.RequestException as e:
-            raise HTTPException(status_code=503, detail=f"Error connecting to remote model server: {str(e)}")
+            RequestLogger.log_error("RemoteConnectionError", str(e))
+            logger.error(f"Remote connection error: {str(e)}")
+            raise HTTPException(status_code=503, detail="Error connecting to remote model server. Please check server logs.")
 
     if not models:
         raise HTTPException(status_code=503, detail="No models loaded")
@@ -281,9 +344,10 @@ async def predict_ensemble(file: UploadFile = File(...), threshold: float = 0.5,
                 "stub": isinstance(model_obj, _StubModel)
             })
         except Exception as e:
+            logger.error(f"Model {name} prediction error: {str(e)}")
             per_model.append({
                 "model": name,
-                "error": str(e),
+                "error": "Prediction failed",
                 "stub": isinstance(model_obj, _StubModel)
             })
 
@@ -301,7 +365,7 @@ async def predict_ensemble(file: UploadFile = File(...), threshold: float = 0.5,
         fake_probs = [m.get('probability') for m in per_model if m.get('probability') is not None]
     ensemble_confidence = float(np.mean(fake_probs)) if fake_probs else 0.5
 
-    return {
+    result = {
         "models": per_model,
         "ensemble": {
             "majority_label": "fake" if majority_fake else "real",
@@ -312,9 +376,39 @@ async def predict_ensemble(file: UploadFile = File(...), threshold: float = 0.5,
             "threshold": threshold
         }
     }
+    
+    # Cache the result
+    cache.set(contents, cache_key_model, result, threshold)
+    
+    # Log prediction
+    processing_time = time.time() - start_time
+    RequestLogger.log_prediction(
+        model="ensemble",
+        predicted_class=result["ensemble"]["majority_class"],
+        confidence=ensemble_confidence,
+        cached=False,
+        processing_time=processing_time,
+        total_models=total_models,
+        fake_votes=fake_votes
+    )
+    logger.info(f"Ensemble prediction completed (took {processing_time*1000:.2f}ms)")
+    
+    return result
 
 @app.post("/predict/{model_name}")
-async def predict(model_name: str, file: UploadFile = File(...), threshold: float = 0.5):
+@limiter.limit(RATE_LIMIT_CONFIG["predict_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+async def predict(request: Request, model_name: str, file: UploadFile = File(...), threshold: float = 0.5):
+    start_time = time.time()
+    client_ip = get_remote_address(request)
+    
+    # Log request
+    RequestLogger.log_request(
+        endpoint=f"/predict/{model_name}",
+        method="POST",
+        client_ip=client_ip,
+        threshold=threshold
+    )
+    
     # Accept both 'vgg' and 'vgg16' for compatibility
     valid_models = ["cnn", "effnet", "vgg", "vgg16"]
     if model_name not in valid_models:
@@ -328,6 +422,20 @@ async def predict(model_name: str, file: UploadFile = File(...), threshold: floa
     internal_model_name = "vgg" if model_name == "vgg16" else model_name
     
     contents = await file.read()
+    
+    # Check cache first
+    cached_result = cache.get(contents, internal_model_name, threshold)
+    if cached_result is not None:
+        processing_time = time.time() - start_time
+        logger.info(f"Prediction for {internal_model_name} served from cache (took {processing_time*1000:.2f}ms)")
+        RequestLogger.log_prediction(
+            model=internal_model_name,
+            predicted_class=cached_result.get("predicted_class", 0),
+            confidence=cached_result.get("probability", 0.5),
+            cached=True,
+            processing_time=processing_time
+        )
+        return cached_result
     
     # If using remote models, forward the request
     if use_remote_models:
@@ -352,17 +460,30 @@ async def predict(model_name: str, file: UploadFile = File(...), threshold: floa
             
             # Check if the request was successful
             if response.status_code == 200:
-                return response.json()
+                result = response.json()
+                # Cache the result
+                cache.set(contents, internal_model_name, result, threshold)
+                processing_time = time.time() - start_time
+                RequestLogger.log_prediction(
+                    model=internal_model_name,
+                    predicted_class=result.get("predicted_class", 0),
+                    confidence=result.get("probability", 0.5),
+                    cached=False,
+                    processing_time=processing_time
+                )
+                return result
             else:
+                logger.error(f"Remote model error: {response.status_code} - {response.text}")
                 raise HTTPException(
                     status_code=response.status_code,
-                    detail=f"Remote model server error: {response.text}"
+                    detail="Remote model server error. Please check server logs."
                 )
                 
         except requests.RequestException as e:
+            logger.error(f"Remote connection error: {str(e)}")
             raise HTTPException(
                 status_code=503,
-                detail=f"Error connecting to remote model server: {str(e)}"
+                detail="Error connecting to remote model server. Please check server logs."
             )
     
     # If not using remote models, use local models
@@ -452,7 +573,7 @@ async def predict(model_name: str, file: UploadFile = File(...), threshold: floa
             import traceback
             traceback.print_exc()
         
-        return {
+        result = {
             "model": model_name,  # Return original model name for API consistency
             "predicted_class": predicted_class,
             "probabilities": probabilities,
@@ -462,10 +583,28 @@ async def predict(model_name: str, file: UploadFile = File(...), threshold: floa
             "interpretation": f"{'FAKE' if predicted_class == 1 else 'REAL'} ({fake_confidence:.1%} fake confidence)",
             "heatmap": heatmap_data
         }
+        
+        # Cache the result
+        cache.set(contents, internal_model_name, result, threshold)
+        
+        # Log prediction
+        processing_time = time.time() - start_time
+        RequestLogger.log_prediction(
+            model=internal_model_name,
+            predicted_class=predicted_class,
+            confidence=fake_confidence,
+            cached=False,
+            processing_time=processing_time
+        )
+        logger.info(f"Prediction for {internal_model_name} completed (took {processing_time*1000:.2f}ms)")
+        
+        return result
     except Exception as e:
+        RequestLogger.log_error("PredictionError", str(e), model=internal_model_name)
+        logger.error(f"Prediction error for {internal_model_name}: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Error processing with local model: {str(e)}"
+            detail=f"Error processing with local model. Please check server logs for details."
         )
 
 
@@ -600,17 +739,43 @@ def generate_improved_gradcam(actual_model, img_array, model_type="cnn", target_
         return None
 
 @app.get("/")
-def root():
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def root(request: Request):
     return {"message": "Backend is running. Use /predict/cnn, /predict/effnet, /predict/vgg, or /predict/vgg16"}
 
 @app.get("/health")
-def health_check():
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def health_check(request: Request):
     loaded_models = list(models.keys())
+    cache_stats = cache.get_stats()
     return {
         "status": "ok",
         "loaded_models": loaded_models,
-        "available_models": ["cnn", "effnet", "vgg", "vgg16"]
+        "available_models": ["cnn", "effnet", "vgg", "vgg16"],
+        "cache": cache_stats,
+        "rate_limiting": {
+            "enabled": RATE_LIMIT_CONFIG["enabled"],
+            "limits": {
+                "default": RATE_LIMIT_CONFIG["default_limit"],
+                "predict": RATE_LIMIT_CONFIG["predict_limit"],
+                "ensemble": RATE_LIMIT_CONFIG["ensemble_limit"]
+            }
+        }
     }
+
+@app.get("/cache/stats")
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def cache_stats(request: Request):
+    """Get detailed cache statistics."""
+    return cache.get_stats()
+
+@app.post("/cache/clear")
+@limiter.limit("10/minute")
+def clear_cache(request: Request):
+    """Clear all cached predictions. Restricted to prevent abuse."""
+    cache.clear()
+    logger.info(f"Cache cleared by request from {get_remote_address(request)}")
+    return {"message": "Cache cleared successfully"}
 
 if __name__ == "__main__":
     import uvicorn
