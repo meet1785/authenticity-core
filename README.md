@@ -10,10 +10,13 @@ AuthenticityNet is an AI-powered image authenticity verification system that use
 - ⚡ **Intelligent Caching**: ~99% faster responses for repeated queries
 - 🛡️ **Rate Limiting**: Protection against abuse with configurable limits
 - 📊 **Structured Logging**: JSON-formatted logs for monitoring and debugging
+- 📈 **Analytics & Monitoring**: Track predictions, model performance, and system metrics
 - 🌐 **Distributed Support**: Optional remote model server deployment
 - 🎨 **Modern UI**: React-based frontend with real-time analysis
 
 For details on rate limiting and caching, see [RATE_LIMITING_CACHING.md](RATE_LIMITING_CACHING.md).
+
+For details on analytics and monitoring, see [ANALYTICS.md](ANALYTICS.md).
 
 ## Project Structure
 
@@ -79,6 +82,23 @@ The backend will be available at:
 - **POST /predict/cnn** - Make predictions using the CNN model
 - **POST /predict/effnet** - Make predictions using the EfficientNet model
 - **POST /predict/vgg** - Make predictions using the VGG16 model
+- **POST /predict/ensemble** - Run all models and return majority vote
+
+### Analytics Endpoints
+- **GET /analytics/summary** - Overall system statistics
+- **GET /analytics/models/{model_name}** - Per-model performance metrics
+- **GET /analytics/predictions** - Recent prediction history
+- **GET /analytics/confidence-distribution** - Confidence score histogram
+- **GET /analytics/ensemble-agreement** - Model agreement analysis
+
+### Cache Endpoints
+- **GET /cache/stats** - Cache statistics
+- **POST /cache/clear** - Clear the cache
+
+### Health Endpoints
+- **GET /health** - System health check
+
+For complete API documentation and examples, see [ANALYTICS.md](ANALYTICS.md).
 
 ## Making Requests
 
@@ -104,3 +124,61 @@ POST http://127.0.0.1:8000/predict/vgg
 ```
 
 Make sure to include the image file in the request body as `multipart/form-data` with the field name `file`.
+
+## Analytics & Monitoring
+
+AuthenticityNet includes a comprehensive analytics system to track and analyze predictions:
+
+### Quick Analytics Examples
+
+**Get overall statistics:**
+```bash
+curl "http://localhost:8000/analytics/summary?hours=24"
+```
+
+**Get model-specific metrics:**
+```bash
+curl "http://localhost:8000/analytics/models/cnn?hours=24"
+```
+
+**View recent predictions:**
+```bash
+curl "http://localhost:8000/analytics/predictions?limit=50"
+```
+
+**Analyze confidence distribution:**
+```bash
+curl "http://localhost:8000/analytics/confidence-distribution?model=cnn"
+```
+
+**Check ensemble agreement:**
+```bash
+curl "http://localhost:8000/analytics/ensemble-agreement?hours=24"
+```
+
+### What Gets Tracked
+
+- ✅ Total predictions per model
+- ✅ Average confidence scores
+- ✅ Processing times and performance
+- ✅ Cache hit rates
+- ✅ Fake vs. real classifications
+- ✅ Ensemble voting patterns
+- ✅ Model agreement rates
+- 🔒 All sensitive data (images, IPs) automatically hashed
+
+### Configuration
+
+Enable/disable analytics in `backend/config.py`:
+
+```python
+ANALYTICS_CONFIG = {
+    "enabled": True,              # Master switch
+    "db_path": "analytics.db",    # Database location
+    "retention_days": 30,         # How long to keep data
+    "track_client_ips": True,     # Hash and track IPs
+    "auto_cleanup": True,         # Auto-remove old records
+}
+```
+
+For complete documentation, see [ANALYTICS.md](ANALYTICS.md).
