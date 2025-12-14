@@ -11,6 +11,10 @@ lerna-debug.log*
 backend/logs/
 *.log.*
 
+# Analytics database
+backend/analytics.db
+analytics.db
+
 node_modules
 dist
 dist-ssr
