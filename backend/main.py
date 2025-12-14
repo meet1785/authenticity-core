@@ -3,8 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from contextlib import asynccontextmanager
+import asyncio
 import time
 import logging
+import hashlib
 try:
     # TensorFlow is optional for development. If unavailable we fall back to stubs so the API can run.
     from tensorflow.keras.models import load_model
@@ -24,10 +27,11 @@ import os
 import cv2
 import base64
 from io import BytesIO
-from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG, RATE_LIMIT_CONFIG, CACHE_CONFIG
+from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG, RATE_LIMIT_CONFIG, CACHE_CONFIG, ANALYTICS_CONFIG
 from utilities import generate_gradcam_cnn, generate_gradcam_effnet, generate_gradcam_vgg16, toImageArray
 from cache_manager import get_cache
 from logging_config import RequestLogger
+from analytics_manager import AnalyticsManager
 
 # Initialize logging
 logger = logging.getLogger(__name__)
@@ -35,7 +39,52 @@ logger = logging.getLogger(__name__)
 # Initialize rate limiter
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI()
+# Initialize analytics
+analytics = None
+cleanup_task = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown."""
+    global analytics, cleanup_task
+    
+    # Startup
+    if ANALYTICS_CONFIG["enabled"]:
+        analytics = AnalyticsManager(
+            db_path=ANALYTICS_CONFIG["db_path"],
+            retention_days=ANALYTICS_CONFIG["retention_days"]
+        )
+        logger.info("Analytics system initialized")
+        
+        # Start cleanup task if auto_cleanup is enabled
+        if ANALYTICS_CONFIG["auto_cleanup"]:
+            async def periodic_cleanup():
+                while True:
+                    await asyncio.sleep(ANALYTICS_CONFIG["cleanup_interval_hours"] * 3600)
+                    try:
+                        deleted = analytics.cleanup_old_records()
+                        logger.info(f"Periodic cleanup completed: {deleted} records deleted")
+                    except Exception as e:
+                        logger.error(f"Periodic cleanup failed: {e}")
+            
+            cleanup_task = asyncio.create_task(periodic_cleanup())
+            logger.info(f"Automatic cleanup scheduled every {ANALYTICS_CONFIG['cleanup_interval_hours']} hours")
+    
+    yield
+    
+    # Shutdown
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    
+    if analytics:
+        analytics.close()
+        logger.info("Analytics system closed")
+
+app = FastAPI(lifespan=lifespan)
 
 # Add rate limiter to app state
 app.state.limiter = limiter
@@ -391,6 +440,28 @@ async def predict_ensemble(request: Request, file: UploadFile = File(...), thres
         total_models=total_models,
         fake_votes=fake_votes
     )
+    
+    # Record analytics
+    if ANALYTICS_CONFIG["enabled"] and analytics:
+        try:
+            image_hash = hashlib.sha256(contents).hexdigest()
+            client_ip_hash = hashlib.sha256(client_ip.encode()).hexdigest() if ANALYTICS_CONFIG["track_client_ips"] else None
+            
+            analytics.record_prediction(
+                model="ensemble",
+                predicted_class=result["ensemble"]["majority_class"],
+                confidence=ensemble_confidence,
+                threshold=threshold,
+                processing_time=processing_time * 1000,
+                cached=False,
+                image_hash=image_hash,
+                client_ip_hash=client_ip_hash,
+                ensemble_votes={"fake_votes": fake_votes, "total_models": total_models},
+                total_models=total_models
+            )
+        except Exception as e:
+            logger.error(f"Failed to record analytics: {e}")
+    
     logger.info(f"Ensemble prediction completed (took {processing_time*1000:.2f}ms)")
     
     return result
@@ -596,6 +667,26 @@ async def predict(request: Request, model_name: str, file: UploadFile = File(...
             cached=False,
             processing_time=processing_time
         )
+        
+        # Record analytics
+        if ANALYTICS_CONFIG["enabled"] and analytics:
+            try:
+                image_hash = hashlib.sha256(contents).hexdigest()
+                client_ip_hash = hashlib.sha256(client_ip.encode()).hexdigest() if ANALYTICS_CONFIG["track_client_ips"] else None
+                
+                analytics.record_prediction(
+                    model=internal_model_name,
+                    predicted_class=predicted_class,
+                    confidence=fake_confidence,
+                    threshold=threshold,
+                    processing_time=processing_time * 1000,
+                    cached=False,
+                    image_hash=image_hash,
+                    client_ip_hash=client_ip_hash
+                )
+            except Exception as e:
+                logger.error(f"Failed to record analytics: {e}")
+        
         logger.info(f"Prediction for {internal_model_name} completed (took {processing_time*1000:.2f}ms)")
         
         return result
@@ -776,6 +867,114 @@ def clear_cache(request: Request):
     cache.clear()
     logger.info(f"Cache cleared by request from {get_remote_address(request)}")
     return {"message": "Cache cleared successfully"}
+
+# Analytics endpoints
+@app.get("/analytics/summary")
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def analytics_summary(request: Request, hours: int = 24):
+    """
+    Get overall analytics summary.
+    
+    Args:
+        hours: Number of hours to look back (default: 24)
+    """
+    if not ANALYTICS_CONFIG["enabled"] or not analytics:
+        raise HTTPException(status_code=503, detail="Analytics not enabled")
+    
+    if hours < 1 or hours > 720:  # Max 30 days
+        raise HTTPException(status_code=400, detail="Hours must be between 1 and 720")
+    
+    stats = analytics.get_summary_stats(hours=hours)
+    return stats
+
+@app.get("/analytics/models/{model_name}")
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def analytics_model(request: Request, model_name: str, hours: int = 24):
+    """
+    Get analytics for a specific model.
+    
+    Args:
+        model_name: Name of the model (cnn, effnet, vgg, ensemble)
+        hours: Number of hours to look back (default: 24)
+    """
+    if not ANALYTICS_CONFIG["enabled"] or not analytics:
+        raise HTTPException(status_code=503, detail="Analytics not enabled")
+    
+    valid_models = ["cnn", "effnet", "vgg", "ensemble"]
+    if model_name not in valid_models:
+        raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+    
+    if hours < 1 or hours > 720:
+        raise HTTPException(status_code=400, detail="Hours must be between 1 and 720")
+    
+    stats = analytics.get_model_stats(model_name=model_name, hours=hours)
+    return stats
+
+@app.get("/analytics/predictions")
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def analytics_predictions(request: Request, limit: int = 100, model: str = None):
+    """
+    Get recent prediction history.
+    
+    Args:
+        limit: Maximum number of records to return (default: 100, max: 1000)
+        model: Filter by model name (optional)
+    """
+    if not ANALYTICS_CONFIG["enabled"] or not analytics:
+        raise HTTPException(status_code=503, detail="Analytics not enabled")
+    
+    if limit < 1 or limit > 1000:
+        raise HTTPException(status_code=400, detail="Limit must be between 1 and 1000")
+    
+    if model:
+        valid_models = ["cnn", "effnet", "vgg", "ensemble"]
+        if model not in valid_models:
+            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+    
+    predictions = analytics.get_recent_predictions(limit=limit, model=model)
+    return {"predictions": predictions, "count": len(predictions)}
+
+@app.get("/analytics/confidence-distribution")
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def analytics_confidence_distribution(request: Request, model: str = None, bins: int = 10):
+    """
+    Get confidence score distribution.
+    
+    Args:
+        model: Filter by model name (optional)
+        bins: Number of bins for histogram (default: 10, max: 20)
+    """
+    if not ANALYTICS_CONFIG["enabled"] or not analytics:
+        raise HTTPException(status_code=503, detail="Analytics not enabled")
+    
+    if bins < 2 or bins > 20:
+        raise HTTPException(status_code=400, detail="Bins must be between 2 and 20")
+    
+    if model:
+        valid_models = ["cnn", "effnet", "vgg", "ensemble"]
+        if model not in valid_models:
+            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+    
+    distribution = analytics.get_confidence_distribution(model_name=model, bins=bins)
+    return distribution
+
+@app.get("/analytics/ensemble-agreement")
+@limiter.limit(RATE_LIMIT_CONFIG["default_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+def analytics_ensemble_agreement(request: Request, hours: int = 24):
+    """
+    Get ensemble model agreement statistics.
+    
+    Args:
+        hours: Number of hours to look back (default: 24)
+    """
+    if not ANALYTICS_CONFIG["enabled"] or not analytics:
+        raise HTTPException(status_code=503, detail="Analytics not enabled")
+    
+    if hours < 1 or hours > 720:
+        raise HTTPException(status_code=400, detail="Hours must be between 1 and 720")
+    
+    agreement = analytics.get_ensemble_agreement(hours=hours)
+    return agreement
 
 if __name__ == "__main__":
     import uvicorn

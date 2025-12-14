@@ -85,3 +85,13 @@ LOGGING_CONFIG = {
     "max_log_size_mb": 10,
     "backup_count": 5
 }
+
+# Analytics settings
+ANALYTICS_CONFIG = {
+    "enabled": True,
+    "db_path": "analytics.db",
+    "retention_days": 30,
+    "track_client_ips": True,
+    "auto_cleanup": True,
+    "cleanup_interval_hours": 24
+}
