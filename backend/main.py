@@ -534,7 +534,7 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
     if model_name not in valid_models:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}"
+            detail=f"Invalid model name. Use: {', '.join(valid_models)}"
         )
     
     # Validate threshold
@@ -1298,7 +1298,7 @@ def analytics_model(request: Request, model_name: str, hours: int = 24):
         hours: Number of hours to look back (default: 24)
     """
     if not ANALYTICS_CONFIG["enabled"] or not analytics:
-                raise HTTPException(status_code=503, detail="Analytics not enabled")
+        raise HTTPException(status_code=503, detail="Analytics not enabled")
     
     if model_name not in VALID_MODELS_FOR_ANALYTICS:
         raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
@@ -1327,7 +1327,7 @@ def analytics_predictions(request: Request, limit: int = 100, model: str = None)
     
     if model:
         # Use VALID_MODELS_FOR_ANALYTICS constant
-        if model and model not in VALID_MODELS_FOR_ANALYTICS:
+        if model not in VALID_MODELS_FOR_ANALYTICS:
             raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     predictions = analytics.get_recent_predictions(limit=limit, model=model)
@@ -1351,7 +1351,7 @@ def analytics_confidence_distribution(request: Request, model: str = None, bins:
     
     if model:
         # Use VALID_MODELS_FOR_ANALYTICS constant
-        if model and model not in VALID_MODELS_FOR_ANALYTICS:
+        if model not in VALID_MODELS_FOR_ANALYTICS:
             raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     distribution = analytics.get_confidence_distribution(model_name=model, bins=bins)
