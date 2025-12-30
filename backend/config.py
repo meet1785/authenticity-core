@@ -64,6 +64,7 @@ RATE_LIMIT_CONFIG = {
     "default_limit": "30/minute",
     "predict_limit": "20/minute",  # More restrictive for prediction endpoints
     "ensemble_limit": "10/minute",  # Even more restrictive for ensemble (resource-intensive)
+    "batch_limit": "5/minute",  # More restrictive for batch predictions (resource-intensive)
     "enabled": True
 }
 
@@ -94,4 +95,11 @@ ANALYTICS_CONFIG = {
     "track_client_ips": True,
     "auto_cleanup": True,
     "cleanup_interval_hours": 24
+}
+
+# Batch prediction settings
+BATCH_CONFIG = {
+    "max_images": 10,  # Maximum number of images per batch request
+    "timeout_per_image": 30,  # Timeout for processing each image in seconds
+    "parallel_processing": False,  # Whether to process images in parallel (future feature)
 }

@@ -6,6 +6,7 @@ AuthenticityNet is an AI-powered image authenticity verification system that use
 
 - 🤖 **Multiple AI Models**: CNN, EfficientNet, and VGG16 for accurate deepfake detection
 - 🎯 **Ensemble Predictions**: Majority voting across models for improved accuracy
+- 📦 **Batch Processing**: Process multiple images in a single API call for efficiency
 - 🔥 **GradCAM Heatmaps**: Visual explanations of model decisions
 - ⚡ **Intelligent Caching**: ~99% faster responses for repeated queries
 - 🛡️ **Rate Limiting**: Protection against abuse with configurable limits
@@ -17,6 +18,8 @@ AuthenticityNet is an AI-powered image authenticity verification system that use
 For details on rate limiting and caching, see [RATE_LIMITING_CACHING.md](RATE_LIMITING_CACHING.md).
 
 For details on analytics and monitoring, see [ANALYTICS.md](ANALYTICS.md).
+
+For details on batch predictions, see [BATCH_PREDICTION.md](BATCH_PREDICTION.md).
 
 ## Project Structure
 
@@ -83,6 +86,7 @@ The backend will be available at:
 - **POST /predict/effnet** - Make predictions using the EfficientNet model
 - **POST /predict/vgg** - Make predictions using the VGG16 model
 - **POST /predict/ensemble** - Run all models and return majority vote
+- **POST /predict/batch/{model_name}** - Process multiple images in a single request
 
 ### Analytics Endpoints
 - **GET /analytics/summary** - Overall system statistics
@@ -102,6 +106,8 @@ For complete API documentation and examples, see [ANALYTICS.md](ANALYTICS.md).
 
 ## Making Requests
 
+### Single Image Prediction
+
 Send a POST request with an image file in the `file` field using `multipart/form-data` format.
 
 Example response:
@@ -113,6 +119,62 @@ Example response:
 }
 ```
 
+### Batch Image Prediction
+
+Process multiple images in a single request for improved efficiency:
+
+```bash
+curl -X POST "http://localhost:8000/predict/batch/cnn" \
+  -F "files=@image1.jpg" \
+  -F "files=@image2.jpg" \
+  -F "files=@image3.jpg"
+```
+
+You can also use the ensemble model for batch predictions:
+
+```bash
+curl -X POST "http://localhost:8000/predict/batch/ensemble?threshold=0.5" \
+  -F "files=@image1.jpg" \
+  -F "files=@image2.jpg"
+```
+
+**Batch Prediction Features:**
+- Process up to 10 images per request (configurable)
+- Uses intelligent caching for faster repeated predictions
+- Returns individual results for each image plus summary statistics
+- Automatically records analytics for each prediction
+- Rate limited to 5 requests per minute (configurable)
+
+Example batch response:
+```json
+{
+  "batch_summary": {
+    "total_images": 3,
+    "successful": 3,
+    "failed": 0,
+    "fake_count": 1,
+    "real_count": 2,
+    "avg_confidence": 0.72,
+    "cached_count": 0,
+    "avg_processing_time_ms": 105.3,
+    "total_processing_time_ms": 316.0
+  },
+  "results": [
+    {
+      "image_index": 0,
+      "filename": "image1.jpg",
+      "cached": false,
+      "model": "cnn",
+      "predicted_class": 1,
+      "probabilities": [0.15, 0.85],
+      "probability": 0.85
+    }
+  ],
+  "model": "cnn",
+  "threshold": 0.5
+}
+```
+
 ## Frontend Integration
 
 In your frontend application, send requests to the appropriate endpoint based on the model you want to use:
@@ -121,9 +183,11 @@ In your frontend application, send requests to the appropriate endpoint based on
 POST http://127.0.0.1:8000/predict/cnn
 POST http://127.0.0.1:8000/predict/effnet
 POST http://127.0.0.1:8000/predict/vgg
+POST http://127.0.0.1:8000/predict/batch/cnn
+POST http://127.0.0.1:8000/predict/batch/ensemble
 ```
 
-Make sure to include the image file in the request body as `multipart/form-data` with the field name `file`.
+Make sure to include the image file in the request body as `multipart/form-data` with the field name `file` for single predictions or `files` (multiple) for batch predictions.
 
 ## Analytics & Monitoring
 
