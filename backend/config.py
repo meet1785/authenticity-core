@@ -1,5 +1,9 @@
 # Configuration for AuthNet backend
 
+# Valid model names
+VALID_MODELS = ["cnn", "effnet", "vgg", "vgg16"]
+VALID_MODELS_FOR_ANALYTICS = ["cnn", "effnet", "vgg", "ensemble"]
+
 # Model settings
 MODEL_CONFIG = {
     # Local model paths (used when REMOTE_MODEL_SERVER is empty)

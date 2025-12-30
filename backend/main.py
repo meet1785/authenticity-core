@@ -27,7 +27,7 @@ import os
 import cv2
 import base64
 from io import BytesIO
-from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG, RATE_LIMIT_CONFIG, CACHE_CONFIG, ANALYTICS_CONFIG, BATCH_CONFIG
+from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG, RATE_LIMIT_CONFIG, CACHE_CONFIG, ANALYTICS_CONFIG, BATCH_CONFIG, VALID_MODELS, VALID_MODELS_FOR_ANALYTICS
 from utilities import generate_gradcam_cnn, generate_gradcam_effnet, generate_gradcam_vgg16, toImageArray
 from cache_manager import get_cache
 from logging_config import RequestLogger
@@ -264,6 +264,33 @@ def preprocess_image(file, target_size=None):
         
     print(f"📸 Preprocessed image shape: {img_array.shape}")
     return img_array
+
+# Helper function to normalize model names
+def normalize_model_name(model_name: str) -> str:
+    """Normalize model name for internal processing (vgg16 -> vgg)"""
+    return "vgg" if model_name == "vgg16" else model_name
+
+# Helper function to validate file before forwarding
+def validate_upload_file(file: UploadFile) -> None:
+    """Validate file before processing or forwarding to remote server"""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    
+    # Validate file extension
+    allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+    file_ext = os.path.splitext(file.filename.lower())[1]
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
+        )
+    
+    # Validate content type if provided
+    if file.content_type and not file.content_type.startswith('image/'):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid content type. Expected image/*, got {file.content_type}"
+        )
 
 # New ensemble prediction endpoint (must come before generic predict route)
 @app.post("/predict/ensemble")
@@ -502,12 +529,12 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
             detail=f"Batch size exceeds maximum allowed ({BATCH_CONFIG['max_images']} images)"
         )
     
-    # Validate model name
-    valid_models = ["cnn", "effnet", "vgg", "vgg16", "ensemble"]
+    # Validate model name using constant
+    valid_models = VALID_MODELS + ["ensemble"]
     if model_name not in valid_models:
         raise HTTPException(
             status_code=400, 
-            detail=f"Invalid model name. Use: {', '.join(valid_models)}"
+            detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}"
         )
     
     # Validate threshold
@@ -523,6 +550,7 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
         "fake_count": 0,
         "real_count": 0,
         "avg_confidence": 0.0,
+        "confidence_sum": 0.0,  # Track sum separately to avoid issues
         "cached_count": 0,
         "processing_times_ms": []
     }
@@ -530,10 +558,14 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
     for idx, file in enumerate(files):
         try:
             image_start_time = time.time()
+            
+            # Validate file before processing
+            validate_upload_file(file)
+            
             contents = await file.read()
             
-            # Normalize model name for processing
-            internal_model_name = "vgg" if model_name == "vgg16" else model_name
+            # Normalize model name for processing using helper function
+            internal_model_name = normalize_model_name(model_name)
             
             # Check cache first
             if model_name == "ensemble":
@@ -592,8 +624,14 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
                         per_model = []
                         fake_votes = 0
                         
+                        # Check if we have the minimum required models
+                        available_models = [name for name in ["cnn", "effnet", "vgg"] if name in models]
+                        if len(available_models) < 2:
+                            raise Exception(f"Ensemble requires at least 2 models, only {len(available_models)} available")
+                        
                         for name in ["cnn", "effnet", "vgg"]:
                             if name not in models:
+                                logger.warning(f"Model {name} not available for ensemble prediction")
                                 continue
                             model_obj = models[name]
                             prediction = model_obj.predict(img_array)
@@ -727,7 +765,8 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
             else:
                 summary_stats["real_count"] += 1
             
-            summary_stats["avg_confidence"] += confidence
+            # Track confidence sum for proper averaging
+            summary_stats["confidence_sum"] += confidence
             
             results.append(result)
             
@@ -779,7 +818,12 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
     
     # Calculate final summary statistics
     if summary_stats["successful"] > 0:
-        summary_stats["avg_confidence"] /= summary_stats["successful"]
+        summary_stats["avg_confidence"] = summary_stats["confidence_sum"] / summary_stats["successful"]
+    else:
+        summary_stats["avg_confidence"] = 0.0
+    
+    # Remove the confidence_sum from final response (internal only)
+    del summary_stats["confidence_sum"]
     
     if summary_stats["processing_times_ms"]:
         summary_stats["avg_processing_time_ms"] = sum(summary_stats["processing_times_ms"]) / len(summary_stats["processing_times_ms"])
@@ -799,15 +843,16 @@ async def predict_batch(request: Request, model_name: str, files: list[UploadFil
         f"(took {total_time*1000:.2f}ms total, {summary_stats['avg_processing_time_ms']:.2f}ms avg per image)"
     )
     
-    RequestLogger.log_prediction(
-        model=f"batch_{model_name}",
-        predicted_class=-1,  # N/A for batch
-        confidence=summary_stats["avg_confidence"],
-        cached=False,
-        processing_time=total_time,
+    # Log batch operation (not individual predictions - those are logged above)
+    # Note: We don't record batch operations in analytics since each image is recorded individually
+    RequestLogger.log_request(
+        endpoint=f"/predict/batch/{model_name}",
+        method="POST",
+        client_ip=client_ip,
         batch_size=len(files),
         batch_successful=summary_stats["successful"],
-        batch_failed=summary_stats["failed"]
+        batch_failed=summary_stats["failed"],
+        processing_time=total_time
     )
     
     return {
@@ -832,16 +877,15 @@ async def predict(request: Request, model_name: str, file: UploadFile = File(...
     )
     
     # Accept both 'vgg' and 'vgg16' for compatibility
-    valid_models = ["cnn", "effnet", "vgg", "vgg16"]
-    if model_name not in valid_models:
-        raise HTTPException(status_code=400, detail="Invalid model name. Use cnn, effnet, vgg, or vgg16")
+    if model_name not in VALID_MODELS:
+        raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS)}")
     
     # Validate threshold
     if not 0.1 <= threshold <= 0.9:
         raise HTTPException(status_code=400, detail="Threshold must be between 0.1 and 0.9")
     
-    # Normalize vgg16 to vgg for internal processing
-    internal_model_name = "vgg" if model_name == "vgg16" else model_name
+    # Normalize vgg16 to vgg for internal processing using helper function
+    internal_model_name = normalize_model_name(model_name)
     
     contents = await file.read()
     
@@ -1254,11 +1298,10 @@ def analytics_model(request: Request, model_name: str, hours: int = 24):
         hours: Number of hours to look back (default: 24)
     """
     if not ANALYTICS_CONFIG["enabled"] or not analytics:
-        raise HTTPException(status_code=503, detail="Analytics not enabled")
+                raise HTTPException(status_code=503, detail="Analytics not enabled")
     
-    valid_models = ["cnn", "effnet", "vgg", "ensemble"]
-    if model_name not in valid_models:
-        raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+    if model_name not in VALID_MODELS_FOR_ANALYTICS:
+        raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     if hours < 1 or hours > 720:
         raise HTTPException(status_code=400, detail="Hours must be between 1 and 720")
@@ -1283,9 +1326,9 @@ def analytics_predictions(request: Request, limit: int = 100, model: str = None)
         raise HTTPException(status_code=400, detail="Limit must be between 1 and 1000")
     
     if model:
-        valid_models = ["cnn", "effnet", "vgg", "ensemble"]
-        if model not in valid_models:
-            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+        # Use VALID_MODELS_FOR_ANALYTICS constant
+        if model and model not in VALID_MODELS_FOR_ANALYTICS:
+            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     predictions = analytics.get_recent_predictions(limit=limit, model=model)
     return {"predictions": predictions, "count": len(predictions)}
@@ -1307,9 +1350,9 @@ def analytics_confidence_distribution(request: Request, model: str = None, bins:
         raise HTTPException(status_code=400, detail="Bins must be between 2 and 20")
     
     if model:
-        valid_models = ["cnn", "effnet", "vgg", "ensemble"]
-        if model not in valid_models:
-            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+        # Use VALID_MODELS_FOR_ANALYTICS constant
+        if model and model not in VALID_MODELS_FOR_ANALYTICS:
+            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     distribution = analytics.get_confidence_distribution(model_name=model, bins=bins)
     return distribution
