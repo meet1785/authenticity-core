@@ -27,7 +27,7 @@ import os
 import cv2
 import base64
 from io import BytesIO
-from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG, RATE_LIMIT_CONFIG, CACHE_CONFIG, ANALYTICS_CONFIG
+from config import MODEL_CONFIG, SERVER_CONFIG, PREPROCESSING_CONFIG, RATE_LIMIT_CONFIG, CACHE_CONFIG, ANALYTICS_CONFIG, BATCH_CONFIG, VALID_MODELS, VALID_MODELS_FOR_ANALYTICS
 from utilities import generate_gradcam_cnn, generate_gradcam_effnet, generate_gradcam_vgg16, toImageArray
 from cache_manager import get_cache
 from logging_config import RequestLogger
@@ -265,6 +265,33 @@ def preprocess_image(file, target_size=None):
     print(f"📸 Preprocessed image shape: {img_array.shape}")
     return img_array
 
+# Helper function to normalize model names
+def normalize_model_name(model_name: str) -> str:
+    """Normalize model name for internal processing (vgg16 -> vgg)"""
+    return "vgg" if model_name == "vgg16" else model_name
+
+# Helper function to validate file before forwarding
+def validate_upload_file(file: UploadFile) -> None:
+    """Validate file before processing or forwarding to remote server"""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Filename is required")
+    
+    # Validate file extension
+    allowed_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+    file_ext = os.path.splitext(file.filename.lower())[1]
+    if file_ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
+        )
+    
+    # Validate content type if provided
+    if file.content_type and not file.content_type.startswith('image/'):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid content type. Expected image/*, got {file.content_type}"
+        )
+
 # New ensemble prediction endpoint (must come before generic predict route)
 @app.post("/predict/ensemble")
 @limiter.limit(RATE_LIMIT_CONFIG["ensemble_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
@@ -466,6 +493,375 @@ async def predict_ensemble(request: Request, file: UploadFile = File(...), thres
     
     return result
 
+@app.post("/predict/batch/{model_name}")
+@limiter.limit(RATE_LIMIT_CONFIG["batch_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
+async def predict_batch(request: Request, model_name: str, files: list[UploadFile] = File(...), threshold: float = 0.5):
+    """
+    Process multiple images in a single batch request.
+    
+    Args:
+        model_name: Model to use (cnn, effnet, vgg, vgg16, or ensemble)
+        files: List of image files to process
+        threshold: Prediction threshold (0.1-0.9)
+    
+    Returns:
+        Batch results with per-image predictions and summary statistics
+    """
+    start_time = time.time()
+    client_ip = get_remote_address(request)
+    
+    # Log request
+    RequestLogger.log_request(
+        endpoint=f"/predict/batch/{model_name}",
+        method="POST",
+        client_ip=client_ip,
+        threshold=threshold,
+        batch_size=len(files)
+    )
+    
+    # Validate batch size
+    if len(files) == 0:
+        raise HTTPException(status_code=400, detail="No images provided")
+    
+    if len(files) > BATCH_CONFIG["max_images"]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Batch size exceeds maximum allowed ({BATCH_CONFIG['max_images']} images)"
+        )
+    
+    # Validate model name using constant
+    valid_models = VALID_MODELS + ["ensemble"]
+    if model_name not in valid_models:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid model name. Use: {', '.join(valid_models)}"
+        )
+    
+    # Validate threshold
+    if not 0.1 <= threshold <= 0.9:
+        raise HTTPException(status_code=400, detail="Threshold must be between 0.1 and 0.9")
+    
+    # Process each image
+    results = []
+    summary_stats = {
+        "total_images": len(files),
+        "successful": 0,
+        "failed": 0,
+        "fake_count": 0,
+        "real_count": 0,
+        "avg_confidence": 0.0,
+        "confidence_sum": 0.0,  # Track sum separately to avoid issues
+        "cached_count": 0,
+        "processing_times_ms": []
+    }
+    
+    for idx, file in enumerate(files):
+        try:
+            image_start_time = time.time()
+            
+            # Validate file before processing
+            validate_upload_file(file)
+            
+            contents = await file.read()
+            
+            # Normalize model name for processing using helper function
+            internal_model_name = normalize_model_name(model_name)
+            
+            # Check cache first
+            if model_name == "ensemble":
+                cache_key_model = "ensemble"
+            else:
+                cache_key_model = internal_model_name
+            
+            cached_result = cache.get(contents, cache_key_model, threshold)
+            
+            if cached_result is not None:
+                # Use cached result
+                result = {
+                    "image_index": idx,
+                    "filename": file.filename,
+                    "cached": True,
+                    **cached_result
+                }
+                summary_stats["cached_count"] += 1
+            else:
+                # Process based on model type
+                if model_name == "ensemble":
+                    # Use the ensemble prediction logic
+                    if use_remote_models:
+                        # Forward to remote server
+                        try:
+                            remote_url = f"{MODEL_CONFIG['remote']['server_url']}/predict/ensemble"
+                            headers = {}
+                            if MODEL_CONFIG['remote']['api_key']:
+                                headers['Authorization'] = f"Bearer {MODEL_CONFIG['remote']['api_key']}"
+                            request_files = {'file': (file.filename, contents, file.content_type)}
+                            response = requests.post(
+                                remote_url, 
+                                files=request_files, 
+                                headers=headers, 
+                                timeout=BATCH_CONFIG['timeout_per_image']
+                            )
+                            if response.status_code == 200:
+                                ensemble_result = response.json()
+                                cache.set(contents, cache_key_model, ensemble_result, threshold)
+                                result = {
+                                    "image_index": idx,
+                                    "filename": file.filename,
+                                    "cached": False,
+                                    **ensemble_result
+                                }
+                            else:
+                                raise Exception(f"Remote server error: {response.status_code}")
+                        except Exception as e:
+                            raise Exception(f"Remote prediction failed: {str(e)}")
+                    else:
+                        # Local ensemble prediction
+                        if not models:
+                            raise Exception("No models loaded")
+                        
+                        img_array = preprocess_image(contents)
+                        per_model = []
+                        fake_votes = 0
+                        
+                        # Check if we have the minimum required models
+                        available_models = [name for name in ["cnn", "effnet", "vgg"] if name in models]
+                        if len(available_models) < 2:
+                            raise Exception(f"Ensemble requires at least 2 models, only {len(available_models)} available")
+                        
+                        for name in ["cnn", "effnet", "vgg"]:
+                            if name not in models:
+                                logger.warning(f"Model {name} not available for ensemble prediction")
+                                continue
+                            model_obj = models[name]
+                            prediction = model_obj.predict(img_array)
+                            prediction_flat = prediction.flatten()
+                            
+                            if len(prediction_flat) == 1:
+                                sigmoid_prob = float(prediction_flat[0])
+                                probabilities = [1.0 - sigmoid_prob, sigmoid_prob]
+                                predicted_class = 1 if sigmoid_prob > threshold else 0
+                                fake_confidence = sigmoid_prob
+                            else:
+                                probabilities = prediction.tolist()[0]
+                                predicted_class = int(np.argmax(prediction, axis=1)[0])
+                                fake_confidence = probabilities[1] if len(probabilities) > 1 else 0.5
+                            
+                            if predicted_class == 1:
+                                fake_votes += 1
+                            
+                            per_model.append({
+                                "model": name,
+                                "predicted_class": predicted_class,
+                                "probabilities": probabilities,
+                                "probability": fake_confidence
+                            })
+                        
+                        total_models = len(per_model)
+                        majority_fake = fake_votes > (total_models / 2)
+                        fake_probs = [m.get('probabilities', [None, None])[1] for m in per_model if m.get('probabilities') and len(m['probabilities']) > 1]
+                        if not fake_probs:
+                            fake_probs = [m.get('probability') for m in per_model if m.get('probability') is not None]
+                        ensemble_confidence = float(np.mean(fake_probs)) if fake_probs else 0.5
+                        
+                        ensemble_result = {
+                            "models": per_model,
+                            "ensemble": {
+                                "majority_label": "fake" if majority_fake else "real",
+                                "majority_class": 1 if majority_fake else 0,
+                                "fake_votes": fake_votes,
+                                "total_models": total_models,
+                                "ensemble_confidence": ensemble_confidence,
+                                "threshold": threshold
+                            }
+                        }
+                        
+                        cache.set(contents, cache_key_model, ensemble_result, threshold)
+                        result = {
+                            "image_index": idx,
+                            "filename": file.filename,
+                            "cached": False,
+                            **ensemble_result
+                        }
+                else:
+                    # Single model prediction
+                    if use_remote_models:
+                        # Forward to remote server
+                        try:
+                            remote_url = f"{MODEL_CONFIG['remote']['server_url']}{MODEL_CONFIG['remote']['endpoints'][internal_model_name]}"
+                            headers = {}
+                            if MODEL_CONFIG['remote']['api_key']:
+                                headers['Authorization'] = f"Bearer {MODEL_CONFIG['remote']['api_key']}"
+                            request_files = {'file': (file.filename, contents, file.content_type)}
+                            response = requests.post(
+                                remote_url, 
+                                files=request_files, 
+                                headers=headers, 
+                                timeout=BATCH_CONFIG['timeout_per_image']
+                            )
+                            if response.status_code == 200:
+                                single_result = response.json()
+                                cache.set(contents, cache_key_model, single_result, threshold)
+                                result = {
+                                    "image_index": idx,
+                                    "filename": file.filename,
+                                    "cached": False,
+                                    **single_result
+                                }
+                            else:
+                                raise Exception(f"Remote server error: {response.status_code}")
+                        except Exception as e:
+                            raise Exception(f"Remote prediction failed: {str(e)}")
+                    else:
+                        # Local single model prediction
+                        if internal_model_name not in models:
+                            raise Exception(f"Model {internal_model_name} not loaded")
+                        
+                        img_array = preprocess_image(contents)
+                        prediction = models[internal_model_name].predict(img_array)
+                        prediction_flat = prediction.flatten()
+                        
+                        if len(prediction_flat) == 1:
+                            sigmoid_prob = float(prediction_flat[0])
+                            probabilities = [1.0 - sigmoid_prob, sigmoid_prob]
+                            predicted_class = 1 if sigmoid_prob > threshold else 0
+                            fake_confidence = sigmoid_prob
+                        else:
+                            probabilities = prediction.tolist()[0]
+                            predicted_class = int(np.argmax(prediction, axis=1)[0])
+                            fake_confidence = probabilities[1] if len(probabilities) > 1 else 0.5
+                        
+                        single_result = {
+                            "model": model_name,
+                            "predicted_class": predicted_class,
+                            "probabilities": probabilities,
+                            "probability": fake_confidence,
+                            "threshold": threshold
+                        }
+                        
+                        cache.set(contents, cache_key_model, single_result, threshold)
+                        result = {
+                            "image_index": idx,
+                            "filename": file.filename,
+                            "cached": False,
+                            **single_result
+                        }
+            
+            # Update summary statistics
+            image_processing_time = (time.time() - image_start_time) * 1000
+            summary_stats["processing_times_ms"].append(image_processing_time)
+            summary_stats["successful"] += 1
+            
+            # Extract predicted class for summary
+            if "ensemble" in result:
+                pred_class = result["ensemble"]["majority_class"]
+                confidence = result["ensemble"]["ensemble_confidence"]
+            else:
+                pred_class = result.get("predicted_class", 0)
+                confidence = result.get("probability", 0.5)
+            
+            if pred_class == 1:
+                summary_stats["fake_count"] += 1
+            else:
+                summary_stats["real_count"] += 1
+            
+            # Track confidence sum for proper averaging
+            summary_stats["confidence_sum"] += confidence
+            
+            results.append(result)
+            
+            # Record analytics for each prediction
+            if ANALYTICS_CONFIG["enabled"] and analytics:
+                try:
+                    image_hash = hashlib.sha256(contents).hexdigest()
+                    client_ip_hash = hashlib.sha256(client_ip.encode()).hexdigest() if ANALYTICS_CONFIG["track_client_ips"] else None
+                    
+                    if model_name == "ensemble" and "ensemble" in result:
+                        analytics.record_prediction(
+                            model="ensemble",
+                            predicted_class=result["ensemble"]["majority_class"],
+                            confidence=result["ensemble"]["ensemble_confidence"],
+                            threshold=threshold,
+                            processing_time=image_processing_time,
+                            cached=result.get("cached", False),
+                            image_hash=image_hash,
+                            client_ip_hash=client_ip_hash,
+                            ensemble_votes={
+                                "fake_votes": result["ensemble"]["fake_votes"], 
+                                "total_models": result["ensemble"]["total_models"]
+                            },
+                            total_models=result["ensemble"]["total_models"]
+                        )
+                    else:
+                        analytics.record_prediction(
+                            model=internal_model_name,
+                            predicted_class=pred_class,
+                            confidence=confidence,
+                            threshold=threshold,
+                            processing_time=image_processing_time,
+                            cached=result.get("cached", False),
+                            image_hash=image_hash,
+                            client_ip_hash=client_ip_hash
+                        )
+                except Exception as e:
+                    logger.error(f"Failed to record analytics for batch item {idx}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error processing image {idx} ({file.filename}): {str(e)}")
+            summary_stats["failed"] += 1
+            results.append({
+                "image_index": idx,
+                "filename": file.filename,
+                "error": str(e),
+                "success": False
+            })
+    
+    # Calculate final summary statistics
+    if summary_stats["successful"] > 0:
+        summary_stats["avg_confidence"] = summary_stats["confidence_sum"] / summary_stats["successful"]
+    else:
+        summary_stats["avg_confidence"] = 0.0
+    
+    # Remove the confidence_sum from final response (internal only)
+    del summary_stats["confidence_sum"]
+    
+    if summary_stats["processing_times_ms"]:
+        summary_stats["avg_processing_time_ms"] = sum(summary_stats["processing_times_ms"]) / len(summary_stats["processing_times_ms"])
+        summary_stats["total_processing_time_ms"] = sum(summary_stats["processing_times_ms"])
+    else:
+        summary_stats["avg_processing_time_ms"] = 0
+        summary_stats["total_processing_time_ms"] = 0
+    
+    # Remove the detailed processing times list from response (keep avg/total)
+    del summary_stats["processing_times_ms"]
+    
+    total_time = time.time() - start_time
+    
+    # Log batch completion
+    logger.info(
+        f"Batch prediction completed: {summary_stats['successful']}/{summary_stats['total_images']} successful "
+        f"(took {total_time*1000:.2f}ms total, {summary_stats['avg_processing_time_ms']:.2f}ms avg per image)"
+    )
+    
+    # Log batch operation (not individual predictions - those are logged above)
+    # Note: We don't record batch operations in analytics since each image is recorded individually
+    RequestLogger.log_request(
+        endpoint=f"/predict/batch/{model_name}",
+        method="POST",
+        client_ip=client_ip,
+        batch_size=len(files),
+        batch_successful=summary_stats["successful"],
+        batch_failed=summary_stats["failed"],
+        processing_time=total_time
+    )
+    
+    return {
+        "batch_summary": summary_stats,
+        "results": results,
+        "model": model_name,
+        "threshold": threshold
+    }
+
 @app.post("/predict/{model_name}")
 @limiter.limit(RATE_LIMIT_CONFIG["predict_limit"] if RATE_LIMIT_CONFIG["enabled"] else "1000/minute")
 async def predict(request: Request, model_name: str, file: UploadFile = File(...), threshold: float = 0.5):
@@ -481,16 +877,15 @@ async def predict(request: Request, model_name: str, file: UploadFile = File(...
     )
     
     # Accept both 'vgg' and 'vgg16' for compatibility
-    valid_models = ["cnn", "effnet", "vgg", "vgg16"]
-    if model_name not in valid_models:
-        raise HTTPException(status_code=400, detail="Invalid model name. Use cnn, effnet, vgg, or vgg16")
+    if model_name not in VALID_MODELS:
+        raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS)}")
     
     # Validate threshold
     if not 0.1 <= threshold <= 0.9:
         raise HTTPException(status_code=400, detail="Threshold must be between 0.1 and 0.9")
     
-    # Normalize vgg16 to vgg for internal processing
-    internal_model_name = "vgg" if model_name == "vgg16" else model_name
+    # Normalize vgg16 to vgg for internal processing using helper function
+    internal_model_name = normalize_model_name(model_name)
     
     contents = await file.read()
     
@@ -849,8 +1244,13 @@ def health_check(request: Request):
             "limits": {
                 "default": RATE_LIMIT_CONFIG["default_limit"],
                 "predict": RATE_LIMIT_CONFIG["predict_limit"],
-                "ensemble": RATE_LIMIT_CONFIG["ensemble_limit"]
+                "ensemble": RATE_LIMIT_CONFIG["ensemble_limit"],
+                "batch": RATE_LIMIT_CONFIG["batch_limit"]
             }
+        },
+        "batch": {
+            "max_images": BATCH_CONFIG["max_images"],
+            "timeout_per_image": BATCH_CONFIG["timeout_per_image"]
         }
     }
 
@@ -900,9 +1300,8 @@ def analytics_model(request: Request, model_name: str, hours: int = 24):
     if not ANALYTICS_CONFIG["enabled"] or not analytics:
         raise HTTPException(status_code=503, detail="Analytics not enabled")
     
-    valid_models = ["cnn", "effnet", "vgg", "ensemble"]
-    if model_name not in valid_models:
-        raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+    if model_name not in VALID_MODELS_FOR_ANALYTICS:
+        raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     if hours < 1 or hours > 720:
         raise HTTPException(status_code=400, detail="Hours must be between 1 and 720")
@@ -927,9 +1326,9 @@ def analytics_predictions(request: Request, limit: int = 100, model: str = None)
         raise HTTPException(status_code=400, detail="Limit must be between 1 and 1000")
     
     if model:
-        valid_models = ["cnn", "effnet", "vgg", "ensemble"]
-        if model not in valid_models:
-            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+        # Use VALID_MODELS_FOR_ANALYTICS constant
+        if model not in VALID_MODELS_FOR_ANALYTICS:
+            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     predictions = analytics.get_recent_predictions(limit=limit, model=model)
     return {"predictions": predictions, "count": len(predictions)}
@@ -951,9 +1350,9 @@ def analytics_confidence_distribution(request: Request, model: str = None, bins:
         raise HTTPException(status_code=400, detail="Bins must be between 2 and 20")
     
     if model:
-        valid_models = ["cnn", "effnet", "vgg", "ensemble"]
-        if model not in valid_models:
-            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(valid_models)}")
+        # Use VALID_MODELS_FOR_ANALYTICS constant
+        if model not in VALID_MODELS_FOR_ANALYTICS:
+            raise HTTPException(status_code=400, detail=f"Invalid model name. Use: {', '.join(VALID_MODELS_FOR_ANALYTICS)}")
     
     distribution = analytics.get_confidence_distribution(model_name=model, bins=bins)
     return distribution
